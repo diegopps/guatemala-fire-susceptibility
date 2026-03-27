@@ -12,8 +12,8 @@ Downstream scripts read index to determine subset.
 # SETTINGS
 # =============================================================================
 
-INPUT_DATA_PATH = "/data/data/data_trainingset_2017-2024/allvars_2017-2024.csv"
-OUTPUT_INDEX_PATH = "data/processed/split_index.csv"
+INPUT_DATA_PATH = "../../data/indata/data_trainingset_2017-2024/allvars_2017-2024.csv"
+OUTPUT_INDEX_PATH = "../../data/processed/split_index.csv"
 
 RANDOM_SEED = 107
 
