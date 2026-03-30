@@ -45,7 +45,7 @@ import json
 import sys
 
 # Import the generic plotter from utils
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "utils"))
+sys.path.append(os.path.join(PROJECT_DIR, "src", "utils"))
 from plot_model_comparison import plot_model_comparison
 
 # =============================================================================
