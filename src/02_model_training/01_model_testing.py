@@ -21,7 +21,7 @@ bash wrapper script.
 PROJECT_DIR = "/home/diegopab/projects/ForestFire_GT/paperwriting/ForestFireGT"
 INPUT_DATA_PATH  = f"{PROJECT_DIR}/data/indata/data_trainingset_2017-2024/allvars_2017-2024.csv"
 SPLIT_INDEX_PATH = f"{PROJECT_DIR}/data/processed/split_index.csv"
-OUTPUT_DIR       = f"{PROJECT_DIR}/results/model_testing/"
+OUTPUT_DIR       = f"{PROJECT_DIR}/results/01_model_testing/"
 
 # Features to use (fire is always excluded as target; lat, lon, year excluded)
 FEATURE_COLUMNS = [
