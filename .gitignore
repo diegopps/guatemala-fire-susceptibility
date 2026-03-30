@@ -10,3 +10,6 @@ src/utils/logs
 
 # Results
 results/
+
+# Python
+src/utils/__pycache__/

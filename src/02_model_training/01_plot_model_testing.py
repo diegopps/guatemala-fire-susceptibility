@@ -18,7 +18,7 @@ create a new caller script — do NOT modify plot_model_comparison.py.
 
 PROJECT_DIR = "/home/diegopab/projects/ForestFire_GT/paperwriting/ForestFireGT"
 RESULTS_DIR = f"{PROJECT_DIR}/results/01_model_testing"
-OUTPUT_DIR  = f"{PROJECT_DIR}/resutls/01_model_testing/figures/"
+OUTPUT_DIR  = f"{PROJECT_DIR}/results/01_model_testing/figures/"
 
 # Models to include in the comparison plot.
 # These must match the directory names under RESULTS_DIR.
@@ -46,7 +46,7 @@ import sys
 
 # Import the generic plotter from utils
 sys.path.append(os.path.join(PROJECT_DIR, "src", "utils"))
-from plot_model_comparison import plot_model_comparison
+from plot_metrics import plot_model_comparison
 
 # =============================================================================
 # MAIN
