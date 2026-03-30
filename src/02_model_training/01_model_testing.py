@@ -164,7 +164,7 @@ def save_json(data, path):
 
 
 def save_csv(df, path):
-    df.to_csv(path, index=False)
+    df.to_csv(path, index_label="actual_class")
     print(f"  Saved: {path}")
 
 
