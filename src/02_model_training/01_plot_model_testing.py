@@ -6,7 +6,8 @@ Caller script for comparing all baseline models from the model testing step.
 This script:
   1. Loads metrics.json for each model → calls plot_model_comparison().
   2. Loads confusion_matrix.csv for each model → calls plot_confusion_matrix().
-  3. Loads pr_curve.csv and metrics.json for each model → calls plot_pr_curve().
+  3. Loads pr_curve.csv for each model → calls plot_pr_curve().
+  4. Loads roc_curve.csv for each model → calls plot_roc_curve().
 
 To compare a different subset of models in the future (e.g. only RF and XGB),
 create a new caller script — do NOT modify the plotter modules in utils/.
@@ -48,6 +49,7 @@ sys.path.append(os.path.join(PROJECT_DIR, "src", "utils"))
 from plot_metrics import plot_model_comparison
 from plot_confmatrix import plot_confusion_matrix
 from plot_prcurve import plot_pr_curve
+from plot_roccurve import plot_roc_curve
 
 # =============================================================================
 # HELPERS
@@ -140,7 +142,6 @@ def main():
 
         pr_df = pd.read_csv(pr_path)
 
-        # Load average precision from metrics
         metrics = load_metrics(model_name)
         if metrics is None:
             print(f"  WARNING: metrics.json not found for '{model_name}' — skipping.")
@@ -151,14 +152,13 @@ def main():
             print(f"  WARNING: average_precision missing for '{model_name}' — skipping.")
             continue
 
-        # Compute prevalence from predictions.csv (positive class ratio in test set)
         preds_path = os.path.join(RESULTS_DIR, model_name, "predictions.csv")
         if os.path.exists(preds_path):
-            preds_df   = pd.read_csv(preds_path)
+            preds_df   = pd.read_csv(preds_path, usecols=["y_true"])
             prevalence = preds_df["y_true"].mean()
         else:
             print(f"  WARNING: predictions.csv not found for '{model_name}', "
-                  f"prevalence will default to 0.")
+                  "prevalence will default to 0.")
             prevalence = 0.0
 
         print(f"  Plotting PR curve for: {model_name}")
@@ -167,6 +167,38 @@ def main():
             model_name=model_name,
             avg_precision=avg_precision,
             prevalence=prevalence,
+            output_dir=OUTPUT_DIR,
+        )
+
+    # -------------------------------------------------------------------------
+    # 4. ROC curves — one figure per model
+    # -------------------------------------------------------------------------
+    section("Plotting ROC curves...")
+
+    for model_name in MODELS_TO_PLOT:
+        roc_path = os.path.join(RESULTS_DIR, model_name, "roc_curve.csv")
+
+        if not os.path.exists(roc_path):
+            print(f"  WARNING: roc_curve.csv not found for '{model_name}' — skipping.")
+            continue
+
+        roc_df = pd.read_csv(roc_path)
+
+        metrics = load_metrics(model_name)
+        if metrics is None:
+            print(f"  WARNING: metrics.json not found for '{model_name}' — skipping.")
+            continue
+
+        roc_auc = metrics.get("roc_auc")
+        if roc_auc is None:
+            print(f"  WARNING: roc_auc missing for '{model_name}' — skipping.")
+            continue
+
+        print(f"  Plotting ROC curve for: {model_name}")
+        plot_roc_curve(
+            roc_df=roc_df,
+            model_name=model_name,
+            roc_auc=roc_auc,
             output_dir=OUTPUT_DIR,
         )
 
