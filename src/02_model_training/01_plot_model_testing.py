@@ -8,6 +8,7 @@ This script:
   2. Loads confusion_matrix.csv for each model → calls plot_confusion_matrix().
   3. Loads pr_curve.csv for each model → calls plot_pr_curve().
   4. Loads roc_curve.csv for each model → calls plot_roc_curve().
+  5. Loads feature_importance.csv for each model (if available) → calls plot_feature_importance().
 
 To compare a different subset of models in the future (e.g. only RF and XGB),
 create a new caller script — do NOT modify the plotter modules in utils/.
@@ -50,6 +51,7 @@ from plot_metrics import plot_model_comparison
 from plot_confmatrix import plot_confusion_matrix
 from plot_prcurve import plot_pr_curve
 from plot_roccurve import plot_roc_curve
+from plot_featimportance import plot_feature_importance
 
 # =============================================================================
 # HELPERS
@@ -199,6 +201,27 @@ def main():
             roc_df=roc_df,
             model_name=model_name,
             roc_auc=roc_auc,
+            output_dir=OUTPUT_DIR,
+        )
+
+    # -------------------------------------------------------------------------
+    # 5. Feature importance — one figure per model (skips models without it)
+    # -------------------------------------------------------------------------
+    section("Plotting feature importances...")
+
+    for model_name in MODELS_TO_PLOT:
+        fi_path = os.path.join(RESULTS_DIR, model_name, "feature_importance.csv")
+
+        if not os.path.exists(fi_path):
+            print(f"  NOTE: No feature_importance.csv for '{model_name}' — skipping.")
+            continue
+
+        importance_df = pd.read_csv(fi_path)
+
+        print(f"  Plotting feature importance for: {model_name}")
+        plot_feature_importance(
+            importance_df=importance_df,
+            model_name=model_name,
             output_dir=OUTPUT_DIR,
         )
 
