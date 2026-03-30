@@ -1,3 +1,9 @@
 
 # Input data
 data/indata
+
+# Processeddata
+data/processed
+
+# Slurm logs
+src/utils/logs
