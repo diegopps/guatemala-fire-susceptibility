@@ -4,15 +4,12 @@
 Caller script for comparing all baseline models from the model testing step.
 
 This script:
-  1. Defines which models to compare and where their results live.
-  2. Loads the metrics.json for each model.
-  3. Calls the generic plot_model_comparison() function.
-  4. Loads the confusion_matrix.csv for each model.
-  5. Calls the generic plot_confusion_matrix() function for each model.
+  1. Loads metrics.json for each model → calls plot_model_comparison().
+  2. Loads confusion_matrix.csv for each model → calls plot_confusion_matrix().
+  3. Loads pr_curve.csv and metrics.json for each model → calls plot_pr_curve().
 
 To compare a different subset of models in the future (e.g. only RF and XGB),
-create a new caller script — do NOT modify plot_metrics.py or
-plot_confusion_matrix.py.
+create a new caller script — do NOT modify the plotter modules in utils/.
 """
 
 # =============================================================================
@@ -23,8 +20,6 @@ PROJECT_DIR = "/home/diegopab/projects/ForestFire_GT/paperwriting/ForestFireGT"
 RESULTS_DIR = f"{PROJECT_DIR}/results/01_model_testing"
 OUTPUT_DIR  = f"{PROJECT_DIR}/results/01_model_testing/figures/"
 
-# Models to include in the comparison plot.
-# These must match the directory names under RESULTS_DIR.
 MODELS_TO_PLOT = [
     "logistic_regression",
     "decision_tree",
@@ -46,13 +41,32 @@ PLOT_TITLE      = "Baseline Model Comparison — All Models"
 import os
 import json
 import sys
-import pandas as pd
 import numpy as np
+import pandas as pd
 
-# Import generic plotters from utils
 sys.path.append(os.path.join(PROJECT_DIR, "src", "utils"))
 from plot_metrics import plot_model_comparison
 from plot_confmatrix import plot_confusion_matrix
+from plot_prcurve import plot_pr_curve
+
+# =============================================================================
+# HELPERS
+# =============================================================================
+
+def section(title):
+    print()
+    print("=" * 60)
+    print(title)
+    print("=" * 60)
+
+
+def load_metrics(model_name):
+    path = os.path.join(RESULTS_DIR, model_name, "metrics.json")
+    if not os.path.exists(path):
+        return None
+    with open(path, "r") as f:
+        return json.load(f)
+
 
 # =============================================================================
 # MAIN
@@ -63,22 +77,14 @@ def main():
     # -------------------------------------------------------------------------
     # 1. Metrics bar plot — all models compared
     # -------------------------------------------------------------------------
-    print("=" * 60)
-    print("Plotting metric comparison bar plots...")
-    print("=" * 60)
+    section("Plotting metric comparison bar plots...")
 
     metrics_list = []
-
     for model_name in MODELS_TO_PLOT:
-        metrics_path = os.path.join(RESULTS_DIR, model_name, "metrics.json")
-
-        if not os.path.exists(metrics_path):
+        metrics = load_metrics(model_name)
+        if metrics is None:
             print(f"  WARNING: metrics.json not found for '{model_name}' — skipping.")
             continue
-
-        with open(metrics_path, "r") as f:
-            metrics = json.load(f)
-
         metrics.setdefault("model", model_name)
         metrics_list.append(metrics)
         print(f"  Loaded metrics for: {model_name}")
@@ -98,10 +104,7 @@ def main():
     # -------------------------------------------------------------------------
     # 2. Confusion matrices — one figure per model
     # -------------------------------------------------------------------------
-    print()
-    print("=" * 60)
-    print("Plotting confusion matrices...")
-    print("=" * 60)
+    section("Plotting confusion matrices...")
 
     for model_name in MODELS_TO_PLOT:
         cm_path = os.path.join(RESULTS_DIR, model_name, "confusion_matrix.csv")
@@ -115,12 +118,55 @@ def main():
             cm_df["predicted_negative"].values,
             cm_df["predicted_positive"].values,
         ])
-        print(f"\n  Plotting confusion matrix for: {model_name}")
 
-
+        print(f"  Plotting confusion matrix for: {model_name}")
         plot_confusion_matrix(
             cm=cm,
             model_name=model_name,
+            output_dir=OUTPUT_DIR,
+        )
+
+    # -------------------------------------------------------------------------
+    # 3. PR curves — one figure per model
+    # -------------------------------------------------------------------------
+    section("Plotting Precision-Recall curves...")
+
+    for model_name in MODELS_TO_PLOT:
+        pr_path = os.path.join(RESULTS_DIR, model_name, "pr_curve.csv")
+
+        if not os.path.exists(pr_path):
+            print(f"  WARNING: pr_curve.csv not found for '{model_name}' — skipping.")
+            continue
+
+        pr_df = pd.read_csv(pr_path)
+
+        # Load average precision from metrics
+        metrics = load_metrics(model_name)
+        if metrics is None:
+            print(f"  WARNING: metrics.json not found for '{model_name}' — skipping.")
+            continue
+
+        avg_precision = metrics.get("average_precision")
+        if avg_precision is None:
+            print(f"  WARNING: average_precision missing for '{model_name}' — skipping.")
+            continue
+
+        # Compute prevalence from predictions.csv (positive class ratio in test set)
+        preds_path = os.path.join(RESULTS_DIR, model_name, "predictions.csv")
+        if os.path.exists(preds_path):
+            preds_df   = pd.read_csv(preds_path)
+            prevalence = preds_df["y_true"].mean()
+        else:
+            print(f"  WARNING: predictions.csv not found for '{model_name}', "
+                  f"prevalence will default to 0.")
+            prevalence = 0.0
+
+        print(f"  Plotting PR curve for: {model_name}")
+        plot_pr_curve(
+            pr_df=pr_df,
+            model_name=model_name,
+            avg_precision=avg_precision,
+            prevalence=prevalence,
             output_dir=OUTPUT_DIR,
         )
 
