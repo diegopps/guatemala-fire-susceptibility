@@ -7,3 +7,6 @@ data/processed
 
 # Slurm logs
 src/utils/logs
+
+# Results
+results/
