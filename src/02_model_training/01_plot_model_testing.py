@@ -40,7 +40,7 @@ PLOT_TITLE      = "Baseline Model Comparison — All Models"
 # One set of threshold-sensitive figures (metrics, confusion matrix) is
 # produced per threshold. PR/ROC curves and feature importance are
 # threshold-independent and plotted once as before.
-THRESHOLDS = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5]
+THRESHOLDS = [0.01, 0.03, 0.05, 0.08, 0.1, 0.2, 0.3, 0.4, 0.5]
 
 # =============================================================================
 # IMPORTS
