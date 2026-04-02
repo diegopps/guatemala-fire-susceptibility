@@ -2,7 +2,9 @@
 model_testing.py
 ----------------
 Runs a single baseline ML model on the train/test split and saves all
-metrics and data needed for downstream plotting.
+metrics and data needed for downstream plotting. Additionally, tests for multiple thresholds
+to evaluate model metrics. This is meant for exploring using different thresholds for classifying 
+the very unbalanced forest fire dataset
 
 Usage:
     python model_testing.py <model_name>
@@ -33,6 +35,11 @@ FEATURE_COLUMNS = [
 ]
 
 TARGET_COLUMN = "fire"
+
+# Thresholds to evaluate — metrics.json and confusion_matrix.csv are saved
+# separately as a file for each threshold.
+# PR/ROC curves and feature importance are threshold-independent and saved once.
+THRESHOLDS = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5]
 
 # Models available to run — pass one of these keys as CLI argument
 MODELS = {
@@ -209,36 +216,49 @@ def main(model_key):
         y_prob = None
         print("  WARNING: Model does not support probability estimates.")
 
-    # --- Metrics ---
-    print("\nComputing metrics...")
-    bal_acc  = balanced_accuracy_score(y_test, y_pred)
-    mcc      = matthews_corrcoef(y_test, y_pred)
+    # --- Metrics and confusion matrix — one set per threshold ---
+    # PR/ROC curves and feature importance are threshold-independent and saved once below.
+    print("\nComputing metrics and confusion matrices per threshold...")
+
+    # Threshold-independent metrics computed once
     avg_prec = average_precision_score(y_test, y_prob) if y_prob is not None else None
     roc_auc  = roc_auc_score(y_test, y_prob)           if y_prob is not None else None
 
-    metrics = {
-        "model": model_key,
-        "balanced_accuracy": bal_acc,
-        "matthews_corrcoef": mcc,
-        "average_precision": avg_prec,
-        "roc_auc": roc_auc,
-    }
+    for thresh in THRESHOLDS:
+        # Binarize probabilities at this threshold; fall back to default y_pred if no probs
+        if y_prob is not None:
+            y_pred_t = (y_prob >= thresh).astype(int)
+        else:
+            y_pred_t = y_pred  # only one threshold makes sense without probabilities
 
-    print(f"  Balanced Accuracy : {bal_acc:.4f}")
-    print(f"  MCC               : {mcc:.4f}  <-- primary metric")
-    print(f"  Average Precision : {avg_prec:.4f}" if avg_prec is not None else "  Average Precision : N/A")
-    print(f"  ROC AUC           : {roc_auc:.4f}" if roc_auc is not None else "  ROC AUC           : N/A")
+        bal_acc = balanced_accuracy_score(y_test, y_pred_t)
+        mcc     = matthews_corrcoef(y_test, y_pred_t)
 
-    save_json(metrics, os.path.join(model_out_dir, "metrics.json"))
+        metrics = {
+            "model":             model_key,
+            "threshold":         thresh,
+            "balanced_accuracy": bal_acc,
+            "matthews_corrcoef": mcc,
+            "average_precision": avg_prec,
+            "roc_auc":           roc_auc,
+        }
 
-    # --- Confusion matrix ---
-    cm = confusion_matrix(y_test, y_pred)
-    cm_df = pd.DataFrame(
-        cm,
-        index=["actual_negative", "actual_positive"],
-        columns=["predicted_negative", "predicted_positive"],
-    )
-    save_csv(cm_df, os.path.join(model_out_dir, "confusion_matrix.csv"))
+        print(f"\n  Threshold: {thresh}")
+        print(f"    Balanced Accuracy : {bal_acc:.4f}")
+        print(f"    MCC               : {mcc:.4f}  <-- primary metric")
+        print(f"    Average Precision : {avg_prec:.4f}" if avg_prec is not None else "    Average Precision : N/A")
+        print(f"    ROC AUC           : {roc_auc:.4f}" if roc_auc is not None else "    ROC AUC           : N/A")
+
+        save_json(metrics, os.path.join(model_out_dir, f"metrics_{thresh}.json"))
+
+        # Confusion matrix
+        cm = confusion_matrix(y_test, y_pred_t)
+        cm_df = pd.DataFrame(
+            cm,
+            index=["actual_negative", "actual_positive"],
+            columns=["predicted_negative", "predicted_positive"],
+        )
+        save_csv(cm_df, os.path.join(model_out_dir, f"confusion_matrix_{thresh}.csv"))
 
     # --- Raw predictions & probabilities ---
     preds_df = pd.DataFrame({
@@ -285,7 +305,9 @@ def main(model_key):
     else:
         print("  NOTE: Model does not expose feature importances — skipping.")
 
-    print(f"\nDone. All outputs saved to: {model_out_dir}/")
+    print(f"\nDone. All outputs saved under: {model_out_dir}/")
+    print(f"  Threshold-specific outputs: metrics.json, confusion_matrix.csv")
+    print(f"  Threshold-independent outputs: predictions.csv, pr_curve.csv, roc_curve.csv, feature_importance.csv")
 
 
 if __name__ == "__main__":

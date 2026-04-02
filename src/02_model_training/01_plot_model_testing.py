@@ -36,6 +36,12 @@ MODELS_TO_PLOT = [
 FILENAME_PREFIX = "baseline_model_comparison"
 PLOT_TITLE      = "Baseline Model Comparison — All Models"
 
+# Thresholds to plot — must match those used in 01_model_testing.py.
+# One set of threshold-sensitive figures (metrics, confusion matrix) is
+# produced per threshold. PR/ROC curves and feature importance are
+# threshold-independent and plotted once as before.
+THRESHOLDS = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5]
+
 # =============================================================================
 # IMPORTS
 # =============================================================================
@@ -64,8 +70,8 @@ def section(title):
     print("=" * 60)
 
 
-def load_metrics(model_name):
-    path = os.path.join(RESULTS_DIR, model_name, "metrics.json")
+def load_metrics(model_name, threshold):
+    path = os.path.join(RESULTS_DIR, model_name, f"metrics_{threshold}.json")
     if not os.path.exists(path):
         return None
     with open(path, "r") as f:
@@ -79,56 +85,58 @@ def load_metrics(model_name):
 def main():
 
     # -------------------------------------------------------------------------
-    # 1. Metrics bar plot — all models compared
+    # 1. Metrics bar plot — all models compared, one figure per threshold
     # -------------------------------------------------------------------------
     section("Plotting metric comparison bar plots...")
 
-    metrics_list = []
-    for model_name in MODELS_TO_PLOT:
-        metrics = load_metrics(model_name)
-        if metrics is None:
-            print(f"  WARNING: metrics.json not found for '{model_name}' — skipping.")
+    for thresh in THRESHOLDS:
+        metrics_list = []
+        for model_name in MODELS_TO_PLOT:
+            metrics = load_metrics(model_name, thresh)
+            if metrics is None:
+                print(f"  WARNING: metrics_{thresh}.json not found for '{model_name}' — skipping.")
+                continue
+            metrics.setdefault("model", model_name)
+            metrics_list.append(metrics)
+            print(f"  Loaded metrics for: {model_name} (threshold={thresh})")
+
+        if not metrics_list:
+            print(f"  WARNING: No metrics loaded for threshold {thresh} — skipping.")
             continue
-        metrics.setdefault("model", model_name)
-        metrics_list.append(metrics)
-        print(f"  Loaded metrics for: {model_name}")
 
-    if not metrics_list:
-        print("ERROR: No metrics loaded. Check RESULTS_DIR and model names.")
-        sys.exit(1)
-
-    print(f"\nPlotting comparison for {len(metrics_list)} model(s)...")
-    plot_model_comparison(
-        metrics_list=metrics_list,
-        output_dir=OUTPUT_DIR,
-        filename_prefix=FILENAME_PREFIX,
-        title=PLOT_TITLE,
-    )
+        print(f"\n  Plotting comparison for {len(metrics_list)} model(s) at threshold {thresh}...")
+        plot_model_comparison(
+            metrics_list=metrics_list,
+            output_dir=OUTPUT_DIR,
+            filename_prefix=f"{FILENAME_PREFIX}_t{thresh}",
+            title=f"{PLOT_TITLE} (threshold={thresh})",
+        )
 
     # -------------------------------------------------------------------------
-    # 2. Confusion matrices — one figure per model
+    # 2. Confusion matrices — one figure per model per threshold
     # -------------------------------------------------------------------------
     section("Plotting confusion matrices...")
 
-    for model_name in MODELS_TO_PLOT:
-        cm_path = os.path.join(RESULTS_DIR, model_name, "confusion_matrix.csv")
+    for thresh in THRESHOLDS:
+        for model_name in MODELS_TO_PLOT:
+            cm_path = os.path.join(RESULTS_DIR, model_name, f"confusion_matrix_{thresh}.csv")
 
-        if not os.path.exists(cm_path):
-            print(f"  WARNING: confusion_matrix.csv not found for '{model_name}' — skipping.")
-            continue
+            if not os.path.exists(cm_path):
+                print(f"  WARNING: confusion_matrix_{thresh}.csv not found for '{model_name}' — skipping.")
+                continue
 
-        cm_df = pd.read_csv(cm_path)
-        cm = np.column_stack([
-            cm_df["predicted_negative"].values,
-            cm_df["predicted_positive"].values,
-        ])
+            cm_df = pd.read_csv(cm_path)
+            cm = np.column_stack([
+                cm_df["predicted_negative"].values,
+                cm_df["predicted_positive"].values,
+            ])
 
-        print(f"  Plotting confusion matrix for: {model_name}")
-        plot_confusion_matrix(
-            cm=cm,
-            model_name=model_name,
-            output_dir=OUTPUT_DIR,
-        )
+            print(f"  Plotting confusion matrix for: {model_name} (threshold={thresh})")
+            plot_confusion_matrix(
+                cm=cm,
+                model_name=f"{model_name}_t{thresh}",
+                output_dir=OUTPUT_DIR,
+            )
 
     # -------------------------------------------------------------------------
     # 3. PR curves — one figure per model
@@ -144,9 +152,9 @@ def main():
 
         pr_df = pd.read_csv(pr_path)
 
-        metrics = load_metrics(model_name)
+        metrics = load_metrics(model_name, THRESHOLDS[0])
         if metrics is None:
-            print(f"  WARNING: metrics.json not found for '{model_name}' — skipping.")
+            print(f"  WARNING: metrics_{THRESHOLDS[0]}.json not found for '{model_name}' — skipping.")
             continue
 
         avg_precision = metrics.get("average_precision")
@@ -186,9 +194,9 @@ def main():
 
         roc_df = pd.read_csv(roc_path)
 
-        metrics = load_metrics(model_name)
+        metrics = load_metrics(model_name, THRESHOLDS[0])
         if metrics is None:
-            print(f"  WARNING: metrics.json not found for '{model_name}' — skipping.")
+            print(f"  WARNING: metrics_{THRESHOLDS[0]}.json not found for '{model_name}' — skipping.")
             continue
 
         roc_auc = metrics.get("roc_auc")
