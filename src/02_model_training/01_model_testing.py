@@ -39,7 +39,7 @@ TARGET_COLUMN = "fire"
 # Thresholds to evaluate — metrics.json and confusion_matrix.csv are saved
 # separately as a file for each threshold.
 # PR/ROC curves and feature importance are threshold-independent and saved once.
-THRESHOLDS = [0.05, 0.1, 0.2, 0.3, 0.4, 0.5]
+THRESHOLDS = [0.01, 0.03, 0.05, 0.08, 0.1, 0.2, 0.3, 0.4, 0.5]
 
 # Models available to run — pass one of these keys as CLI argument
 MODELS = {
