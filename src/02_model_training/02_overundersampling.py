@@ -28,7 +28,7 @@ Output directory: results/02_overunder_sampling/<MODEL_SHORT>_<SAMPLER_SHORT>/
 PROJECT_DIR      = "/home/diegopab/projects/ForestFire_GT/paperwriting/ForestFireGT"
 INPUT_DATA_PATH  = f"{PROJECT_DIR}/data/indata/data_trainingset_2017-2024/allvars_2017-2024.csv"
 SPLIT_INDEX_PATH = f"{PROJECT_DIR}/data/processed/split_index.csv"
-OUTPUT_DIR       = f"{PROJECT_DIR}/results/02_overunder_sampling/"
+OUTPUT_DIR       = f"{PROJECT_DIR}/results/02_overundersampling/"
 
 # Features to use (fire is always excluded as target; lat, lon, year excluded)
 FEATURE_COLUMNS = [
@@ -41,10 +41,19 @@ FEATURE_COLUMNS = [
 
 TARGET_COLUMN = "fire"
 
+# Custom threshold per model, chosen based on 01_model_testing exploration.
+# Used for saving threshold-sensitive outputs (metrics, confusion matrix).
+# PR/ROC curves and feature importance are threshold-independent and unaffected.
+MODEL_THRESHOLDS = {
+    "random_forest": 0.03,
+    "xgboost":       0.01,
+    "extra_trees":   0.03,
+}
+
 # ---------------------------------------------------------------------------
 # Models
-# NOTE: XGBoost does not support class_weight="balanced". scale_pos_weight
-#       is computed automatically from the training data in load_data().
+# NOTE: No class_weight or scale_pos_weight is used here — resampling handles
+#       class imbalance instead, keeping each experiment's effect isolated.
 # ---------------------------------------------------------------------------
 MODELS = {
     "random_forest": {
@@ -52,7 +61,6 @@ MODELS = {
         "class": "sklearn.ensemble.RandomForestClassifier",
         "params": {
             "n_estimators": 100,
-            "class_weight": "balanced",
             "random_state": 42,
             "n_jobs": -1,
         },
@@ -61,10 +69,18 @@ MODELS = {
         "short": "XGB",
         "class": "xgboost.XGBClassifier",
         "params": {
-            # scale_pos_weight is set dynamically after loading training data
             "n_estimators": 100,
             "use_label_encoder": False,
             "eval_metric": "logloss",
+            "random_state": 42,
+            "n_jobs": -1,
+        },
+    },
+    "extra_trees": {
+        "short": "XT",
+        "class": "sklearn.ensemble.ExtraTreesClassifier",
+        "params": {
+            "n_estimators": 100,
             "random_state": 42,
             "n_jobs": -1,
         },
@@ -84,17 +100,17 @@ SAMPLERS = {
     "smote": {
         "short": "smote",
         "class": "imblearn.over_sampling.SMOTE",
-        "params": {"random_state": 42, "n_jobs": -1},
+        "params": {"random_state": 42},
     },
     "svmsmote": {
         "short": "svms",
         "class": "imblearn.over_sampling.SVMSMOTE",
-        "params": {"random_state": 42, "n_jobs": -1},
+        "params": {"random_state": 42},
     },
     "adasyn": {
         "short": "adsn",
         "class": "imblearn.over_sampling.ADASYN",
-        "params": {"random_state": 42, "n_jobs": -1},
+        "params": {"random_state": 42},
     },
     # --- Undersampling ---
     "rus": {
@@ -143,22 +159,10 @@ from sklearn.metrics import (
 # HELPERS
 # =============================================================================
 
-def load_model(model_key, scale_pos_weight=None):
-    """
-    Dynamically instantiate a model from its dotted class path.
-
-    scale_pos_weight is only used for XGBoost, computed from training data
-    as n_negatives / n_positives.
-    """
+def load_model(model_key):
+    """Dynamically instantiate a model from its dotted class path."""
     config = MODELS[model_key]
     params = dict(config["params"])  # copy to avoid mutating the global config
-
-    if model_key == "xgboost":
-        if scale_pos_weight is None:
-            raise ValueError("scale_pos_weight must be provided for XGBoost.")
-        params["scale_pos_weight"] = scale_pos_weight
-        print(f"  XGBoost scale_pos_weight set to: {scale_pos_weight:.2f}")
-
     module_path, class_name = config["class"].rsplit(".", 1)
     module = importlib.import_module(module_path)
     cls = getattr(module, class_name)
@@ -175,11 +179,7 @@ def load_sampler(sampler_key):
 
 
 def load_data():
-    """
-    Load the full dataset and split index.
-    Returns train/test subsets plus the scale_pos_weight for XGBoost
-    (computed from the training set only).
-    """
+    """Load the full dataset and split index, return train/test subsets."""
     print(f"Loading data from: {INPUT_DATA_PATH}")
     df = pd.read_csv(INPUT_DATA_PATH)
 
@@ -205,14 +205,11 @@ def load_data():
     X_test  = df_test[FEATURE_COLUMNS]
     y_test  = df_test[TARGET_COLUMN]
 
-    # Compute scale_pos_weight from the raw (pre-resampling) training set
     n_neg = (y_train == 0).sum()
     n_pos = (y_train == 1).sum()
-    scale_pos_weight = n_neg / n_pos
     print(f"  Class balance (train) — negatives: {n_neg:,} | positives: {n_pos:,}")
-    print(f"  scale_pos_weight (XGBoost): {scale_pos_weight:.2f}")
 
-    return X_train, y_train, X_test, y_test, scale_pos_weight
+    return X_train, y_train, X_test, y_test
 
 
 def save_json(data, path):
@@ -257,7 +254,7 @@ def main(model_key, sampler_key):
     print(f"{'='*60}\n")
 
     # --- Load data ---
-    X_train, y_train, X_test, y_test, scale_pos_weight = load_data()
+    X_train, y_train, X_test, y_test = load_data()
 
     # --- Resample training set only ---
     print(f"\nApplying resampler: {sampler_key}...")
@@ -271,7 +268,7 @@ def main(model_key, sampler_key):
 
     # --- Train ---
     print(f"\nTraining {model_key}...")
-    model = load_model(model_key, scale_pos_weight=scale_pos_weight)
+    model = load_model(model_key)
     model.fit(X_train_res, y_train_res)
     print("  Training complete.")
 
@@ -287,42 +284,47 @@ def main(model_key, sampler_key):
         y_prob = None
         print("  WARNING: Model does not support probability estimates.")
 
-    # --- Metrics ---
+    # --- Metrics and confusion matrix — saved at model-specific threshold ---
     print("\nComputing metrics...")
-    bal_acc  = balanced_accuracy_score(y_test, y_pred)
-    mcc      = matthews_corrcoef(y_test, y_pred)
+    thresh   = MODEL_THRESHOLDS[model_key]
+    y_pred_t = (y_prob >= thresh).astype(int) if y_prob is not None else y_pred
+
+    bal_acc  = balanced_accuracy_score(y_test, y_pred_t)
+    mcc      = matthews_corrcoef(y_test, y_pred_t)
     avg_prec = average_precision_score(y_test, y_prob) if y_prob is not None else None
     roc_auc  = roc_auc_score(y_test, y_prob)           if y_prob is not None else None
 
     metrics = {
-        "run":                run_name,
-        "model":              model_key,
-        "sampler":            sampler_key,
-        "balanced_accuracy":  bal_acc,
-        "matthews_corrcoef":  mcc,
-        "average_precision":  avg_prec,
-        "roc_auc":            roc_auc,
-        "train_neg_original": int((y_train == 0).sum()),
-        "train_pos_original": int((y_train == 1).sum()),
+        "run":                 run_name,
+        "model":               model_key,
+        "sampler":             sampler_key,
+        "threshold":           thresh,
+        "balanced_accuracy":   bal_acc,
+        "matthews_corrcoef":   mcc,
+        "average_precision":   avg_prec,
+        "roc_auc":             roc_auc,
+        "train_neg_original":  int((y_train == 0).sum()),
+        "train_pos_original":  int((y_train == 1).sum()),
         "train_neg_resampled": int(n_neg_res),
         "train_pos_resampled": int(n_pos_res),
     }
 
+    print(f"  Threshold         : {thresh}")
     print(f"  Balanced Accuracy : {bal_acc:.4f}")
     print(f"  MCC               : {mcc:.4f}  <-- primary metric")
     print(f"  Average Precision : {avg_prec:.4f}" if avg_prec is not None else "  Average Precision : N/A")
     print(f"  ROC AUC           : {roc_auc:.4f}"  if roc_auc  is not None else "  ROC AUC           : N/A")
 
-    save_json(metrics, os.path.join(out_dir, "metrics.json"))
+    save_json(metrics, os.path.join(out_dir, f"metrics_{thresh}.json"))
 
     # --- Confusion matrix ---
-    cm = confusion_matrix(y_test, y_pred)
+    cm = confusion_matrix(y_test, y_pred_t)
     cm_df = pd.DataFrame(
         cm,
         index=["actual_negative", "actual_positive"],
         columns=["predicted_negative", "predicted_positive"],
     )
-    save_csv(cm_df, os.path.join(out_dir, "confusion_matrix.csv"))
+    save_csv(cm_df, os.path.join(out_dir, f"confusion_matrix_{thresh}.csv"))
 
     # --- Raw predictions & probabilities ---
     preds_df = pd.DataFrame({
