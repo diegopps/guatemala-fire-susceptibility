@@ -1,15 +1,12 @@
 
 # Input data
-data/indata
-
-# Processeddata
-data/processed
-
-# Slurm logs
-src/utils/logs
+data
 
 # Results
-results/
+results
+
+# Slurm logs
+src/02_model_training/logs
 
 # Python
 src/utils/__pycache__/
