@@ -19,8 +19,8 @@ import seaborn as sns
 # Settings
 # ---------------------------------------------------------------------------
 
-INPUT_FILE = "/home/diegopab/projects/ForestFire_GT/paperwriting/data/data_trainingset_2017-2024/allvars_2017-2024_v2.csv"        
-OUTPUT_DIR = "./figures"       
+INPUT_FILE = "/home/diegopab/projects/ForestFire_GT/paperwriting/ForestFireGT/data/indata/data_trainingset_2017-2024/allvars_2017-2024.csv"    
+OUTPUT_DIR = "../../figures/01_data_exploration"
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -28,10 +28,10 @@ OUTPUT_DIR = "./figures"
 
 # Variables to plot and their display labels — split by type
 VARIABLES_TEMPORAL = {
-    "tas":        "Mean Temperature (K)",
-    "tasmax":     "Max Temperature (K)",
-    "tasmin":     "Min Temperature (K)",
-    "pr":         "Precipitation (kg/m²/s)",
+    "tas":        "Mean Temperature (°C)",
+    "tasmax":     "Max Temperature (°C)",
+    "tasmin":     "Min Temperature (°C)",
+    "pr":         "Precipitation (mm/day)",
     "rsds":       "Solar Radiation (W/m²)",
     "PET":        "Potential Evapotranspiration",
     "climbal":    "Climatic Water Balance",
@@ -58,10 +58,10 @@ FLIER_COLOR = "#E84855" # outlier colour for boxplots
 # Seaborn theme — whitegrid gives clean horizontal reference lines
 sns.set_theme(style="whitegrid", font="DejaVu Sans")
 plt.rcParams.update({
-    "axes.titlesize": 12,
-    "axes.labelsize":  9,
-    "xtick.labelsize": 9,
-    "ytick.labelsize": 9,
+    "axes.titlesize": 14,
+    "axes.labelsize":  11,
+    "xtick.labelsize": 11,
+    "ytick.labelsize": 11,
     "axes.spines.top":   False,
     "axes.spines.right": False,
     "figure.dpi": 150,
@@ -79,11 +79,11 @@ def load_data(path: str) -> pd.DataFrame:
     return df
 
 
-def make_grid(n_vars: int, ncols: int):
+def make_grid(n_vars: int, ncols: int, row_height: float = 3.2):
     nrows = -(-n_vars // ncols)          # ceiling division
     fig, axes = plt.subplots(
         nrows, ncols,
-        figsize=(FIG_WIDTH, nrows * 3.2),
+        figsize=(FIG_WIDTH, nrows * row_height),
         constrained_layout=True,
     )
     axes_flat = axes.flatten()
@@ -100,10 +100,20 @@ def make_grid(n_vars: int, ncols: int):
 def plot_boxplots(df: pd.DataFrame, output_path: str, variables: dict, title: str):
     vars_list = list(variables.keys())
     labels    = list(variables.values())
-    fig, axes = make_grid(len(vars_list), NCOLS)
+    # Apply unit conversions where needed
+    converted = {}
+    for var in vars_list:
+        data = df[var].dropna()
+        if var in ("tas", "tasmax", "tasmin"):
+            data = data - 273.15          # K → °C
+        elif var == "pr":
+            data = data * 86400           # kg/m²/s → mm/day
+        converted[var] = data
+
+    fig, axes = make_grid(len(vars_list), NCOLS, row_height=4.2)
 
     for ax, var, label in zip(axes, vars_list, labels):
-        data = df[var].dropna()
+        data = converted[var]
         bp = ax.boxplot(
             data,
             vert=True,
@@ -134,10 +144,20 @@ def plot_boxplots(df: pd.DataFrame, output_path: str, variables: dict, title: st
 def plot_histograms(df: pd.DataFrame, output_path: str, variables: dict, title: str):
     vars_list = list(variables.keys())
     labels    = list(variables.values())
+    # Apply unit conversions where needed
+    converted = {}
+    for var in vars_list:
+        data = df[var].dropna()
+        if var in ("tas", "tasmax", "tasmin"):
+            data = data - 273.15          # K → °C
+        elif var == "pr":
+            data = data * 86400           # kg/m²/s → mm/day
+        converted[var] = data
+
     fig, axes = make_grid(len(vars_list), NCOLS)
 
     for ax, var, label in zip(axes, vars_list, labels):
-        data = df[var].dropna()
+        data = converted[var]
         ax.hist(
             data,
             bins=50,
@@ -171,7 +191,7 @@ def main():
 
     print("Plotting boxplots — temporal variables...")
     plot_boxplots(df, os.path.join(OUTPUT_DIR, "boxplots_temporal.png"),
-                  VARIABLES_TEMPORAL, "Boxplots — Time-Dependent Variables")
+                  VARIABLES_TEMPORAL, "Boxplots — Temporal Variables")
 
     print("Plotting boxplots — static variables...")
     plot_boxplots(df, os.path.join(OUTPUT_DIR, "boxplots_static.png"),
@@ -179,7 +199,7 @@ def main():
 
     print("Plotting histograms — temporal variables...")
     plot_histograms(df, os.path.join(OUTPUT_DIR, "histograms_temporal.png"),
-                    VARIABLES_TEMPORAL, "Histograms — Time-Dependent Variables")
+                    VARIABLES_TEMPORAL, "Histograms — Temporal Variables")
 
     print("Plotting histograms — static variables...")
     plot_histograms(df, os.path.join(OUTPUT_DIR, "histograms_static.png"),

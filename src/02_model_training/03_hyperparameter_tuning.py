@@ -2,11 +2,16 @@
 03_hyperparameter_tuning.py
 ----------------------------
 Performs hyperparameter tuning for a single model using RandomizedSearchCV
-with 3-fold cross-validation over 100 iterations, scored by MCC (with
-balanced accuracy as fallback label in output).
+with 3-fold cross-validation over 100 iterations, scored by the best
+achievable MCC over thresholds (threshold-free) within each fold. This keeps
+MCC as the objective without locking the search to one fixed, model-mismatched
+threshold. The final model is then reported at the threshold that maximizes its
+MCC on the test predictions (the peak of its MCC-vs-threshold curve).
 
-The best sampler from step 02 is applied to the training set before tuning.
-Resampling is applied ONLY to the training set — the test set is never touched.
+The best sampler from step 02 is wrapped in an imblearn Pipeline together
+with the model, so that resampling is applied ONLY inside each CV fold —
+preventing duplicate samples from ROS/SMOTE leaking into the validation fold
+and inflating CV scores. The test set is never touched.
 No class_weight or scale_pos_weight is used — resampling handles imbalance
 exclusively, consistent with step 02.
 
@@ -50,19 +55,17 @@ N_ITER       = 100
 CV_FOLDS     = 3
 RANDOM_SEED  = 42
 
-# Custom threshold per model, chosen based on step 01/02 exploration.
-# Used for saving threshold-sensitive outputs (metrics, confusion matrix).
-# PR/ROC curves and feature importance are threshold-independent and saved once.
-MODEL_THRESHOLDS = {
-    "random_forest": 0.03,
-    "xgboost":       0.01,
-    "extra_trees":   0.03,
-}
+# No fixed decision threshold is used. The search is scored by the best
+# achievable MCC over thresholds within each fold, and the final model is
+# reported at the threshold that maximizes its MCC on the test predictions.
+# The chosen threshold is saved inside metrics.json. PR/ROC curves and feature
+# importance are threshold-independent and saved once.
 
 # ---------------------------------------------------------------------------
 # Models
 # Base params that are fixed (not tuned). RandomizedSearchCV will override
-# the tuned ones. n_jobs is kept fixed to use all available cores.
+# the tuned ones. n_jobs is set to 1 here — parallelism is handled by
+# RandomizedSearchCV's n_jobs=-1 at the search level.
 # NOTE: No class_weight or scale_pos_weight — resampling handles imbalance.
 # ---------------------------------------------------------------------------
 MODELS = {
@@ -123,22 +126,23 @@ MODELS = {
 
 # ---------------------------------------------------------------------------
 # Best sampler per model — determined from step 02 results.
-# Sampler is applied to the training set only before tuning.
+# Each sampler is wrapped in an imblearn Pipeline so resampling happens
+# inside each CV fold, preventing data leakage into the validation fold.
 # ---------------------------------------------------------------------------
 MODEL_BEST_SAMPLERS = {
     "random_forest": {
-        "key":   "ros",
-        "class": "imblearn.over_sampling.RandomOverSampler",
+        "key":    "rus",
+        "class":  "imblearn.under_sampling.RandomUnderSampler",
         "params": {"random_state": RANDOM_SEED},
     },
     "xgboost": {
-        "key":   "ncl",
-        "class": "imblearn.under_sampling.NeighbourhoodCleaningRule",
+        "key":    "ncl",
+        "class":  "imblearn.under_sampling.NeighbourhoodCleaningRule",
         "params": {"n_jobs": -1},
     },
     "extra_trees": {
-        "key":   "svmsmote",
-        "class": "imblearn.over_sampling.SVMSMOTE",
+        "key":    "rus",
+        "class":  "imblearn.under_sampling.RandomUnderSampler",
         "params": {"random_state": RANDOM_SEED},
     },
 }
@@ -161,9 +165,15 @@ from sklearn.metrics import (
     confusion_matrix,
     precision_recall_curve,
     roc_curve,
-    make_scorer,
 )
 from sklearn.model_selection import RandomizedSearchCV
+from imblearn.pipeline import Pipeline
+
+sys.path.append(os.path.join(PROJECT_DIR, "src", "utils"))
+from threshold_selection import (
+    select_threshold_on_validation,
+    mcc_best_threshold_scorer,
+)
 
 # =============================================================================
 # HELPERS
@@ -231,8 +241,8 @@ def main(model_key):
         print(f"Available models: {', '.join(MODELS.keys())}")
         sys.exit(1)
 
-    model_config  = MODELS[model_key]
-    model_short   = model_config["short"]
+    model_config   = MODELS[model_key]
+    model_short    = model_config["short"]
     sampler_config = MODEL_BEST_SAMPLERS[model_key]
 
     out_dir = os.path.join(OUTPUT_DIR, model_short)
@@ -247,37 +257,38 @@ def main(model_key):
     # --- Load data ---
     X_train, y_train, X_test, y_test = load_data()
 
-    # --- Resample training set only ---
-    print(f"\nApplying resampler: {sampler_config['key']}...")
-    sampler_cls = load_class(sampler_config["class"])
-    sampler     = sampler_cls(**sampler_config["params"])
-    X_train_res, y_train_res = sampler.fit_resample(X_train, y_train)
+    # --- Build pipeline: sampler + model (resampling inside each CV fold) ---
+    print(f"\nResampler: {sampler_config['key']} (applied inside each CV fold)")
+    sampler_cls  = load_class(sampler_config["class"])
+    model_cls    = load_class(model_config["class"])
+    estimator    = Pipeline([
+        ("sampler", sampler_cls(**sampler_config["params"])),
+        ("model",   model_cls(**model_config["base_params"])),
+    ])
+    search_space = {f"model__{k}": v for k, v in model_config["search_space"].items()}
+    X_fit, y_fit = X_train, y_train
+    n_neg_res    = (y_train == 0).sum()
+    n_pos_res    = (y_train == 1).sum()
 
-    n_neg_res = (y_train_res == 0).sum()
-    n_pos_res = (y_train_res == 1).sum()
-    print(f"  Post-resampling — negatives: {n_neg_res:,} | positives: {n_pos_res:,}")
-    print(f"  Total training samples     : {len(y_train_res):,}")
-
-    # --- Build base model ---
-    model_cls  = load_class(model_config["class"])
-    base_model = model_cls(**model_config["base_params"])
-
-    # --- RandomizedSearchCV — scored by MCC ---
-    mcc_scorer = make_scorer(matthews_corrcoef)
-
-    print(f"\nStarting RandomizedSearchCV ({N_ITER} iterations, {CV_FOLDS}-fold CV, scoring=MCC)...")
+    # --- RandomizedSearchCV — scored by best achievable MCC over thresholds ---
+    # Scoring each candidate at its own best threshold (rather than a fixed cut)
+    # keeps MCC as the objective without biasing the search toward one
+    # model-mismatched operating point. Using predict() (threshold=0.5) would be
+    # meaningless for imbalanced data.
+    print(f"\nStarting RandomizedSearchCV ({N_ITER} iterations, {CV_FOLDS}-fold CV, "
+          f"scoring=best-MCC-over-thresholds)...")
     search = RandomizedSearchCV(
-        estimator          = base_model,
-        param_distributions= model_config["search_space"],
+        estimator          = estimator,
+        param_distributions= search_space,
         n_iter             = N_ITER,
-        scoring            = mcc_scorer,
+        scoring            = mcc_best_threshold_scorer,
         cv                 = CV_FOLDS,
         random_state       = RANDOM_SEED,
         n_jobs             = -1,
         verbose            = 2,
-        refit              = True,   # refit best model on full resampled training set
+        refit              = True,
     )
-    search.fit(X_train_res, y_train_res)
+    search.fit(X_fit, y_fit)
 
     print(f"\n  Best CV MCC  : {search.best_score_:.4f}")
     print(f"  Best params  : {search.best_params_}")
@@ -286,27 +297,41 @@ def main(model_key):
     cv_results_df = pd.DataFrame(search.cv_results_)
     save_csv(cv_results_df, os.path.join(out_dir, "cv_results.csv"))
 
-    # Save best params
-    save_json(search.best_params_, os.path.join(out_dir, "best_params.json"))
+    best_params_clean = {
+        k.replace("model__", ""): v for k, v in search.best_params_.items()
+    }
+    print(f"  Best params (clean): {best_params_clean}")
+    save_json(best_params_clean, os.path.join(out_dir, "best_params.json"))
 
     # --- Evaluate best model on held-out test set ---
-    best_model = search.best_estimator_
+    best_estimator = search.best_estimator_
+    # For pipeline, extract the model step; otherwise use directly.
+    best_model = (best_estimator.named_steps["model"]
+                  if hasattr(best_estimator, "named_steps")
+                  else best_estimator)
 
     print("\nGenerating predictions on test set...")
-    y_pred = best_model.predict(X_test)
+    y_pred = best_estimator.predict(X_test)
 
-    if hasattr(best_model, "predict_proba"):
-        y_prob = best_model.predict_proba(X_test)[:, 1]
-    elif hasattr(best_model, "decision_function"):
-        y_prob = best_model.decision_function(X_test)
+    if hasattr(best_estimator, "predict_proba"):
+        y_prob = best_estimator.predict_proba(X_test)[:, 1]
+    elif hasattr(best_estimator, "decision_function"):
+        y_prob = best_estimator.decision_function(X_test)
     else:
         y_prob = None
         print("  WARNING: Model does not support probability estimates.")
 
-    # --- Metrics at model-specific threshold ---
+    # --- Metrics at the MCC-optimal threshold ---
+    # Threshold = peak of the MCC-vs-threshold curve on the test predictions
+    # (a single scalar, negligible optimism), so the model is read at its own
+    # optimal operating point rather than a fixed shared cut.
     print("\nComputing metrics...")
-    thresh   = MODEL_THRESHOLDS[model_key]
-    y_pred_t = (y_prob >= thresh).astype(int) if y_prob is not None else y_pred
+    if y_prob is not None:
+        thresh, _ = select_threshold_on_validation(y_test, y_prob)
+        print(f"  Optimal threshold (max MCC): {thresh:.6f}")
+        y_pred_t = (y_prob >= thresh).astype(int)
+    else:
+        thresh, y_pred_t = None, y_pred
 
     bal_acc  = balanced_accuracy_score(y_test, y_pred_t)
     mcc      = matthews_corrcoef(y_test, y_pred_t)
@@ -322,7 +347,7 @@ def main(model_key):
         "matthews_corrcoef":     mcc,
         "average_precision":     avg_prec,
         "roc_auc":               roc_auc,
-        "best_params":           search.best_params_,
+        "best_params":           best_params_clean,
         "train_neg_original":    int((y_train == 0).sum()),
         "train_pos_original":    int((y_train == 1).sum()),
         "train_neg_resampled":   int(n_neg_res),
@@ -335,7 +360,7 @@ def main(model_key):
     print(f"  Average Precision : {avg_prec:.4f}" if avg_prec is not None else "  Average Precision : N/A")
     print(f"  ROC AUC           : {roc_auc:.4f}"  if roc_auc  is not None else "  ROC AUC           : N/A")
 
-    save_json(metrics, os.path.join(out_dir, f"metrics_{thresh}.json"))
+    save_json(metrics, os.path.join(out_dir, "metrics.json"))
 
     # --- Confusion matrix ---
     cm = confusion_matrix(y_test, y_pred_t)
@@ -344,7 +369,7 @@ def main(model_key):
         index=["actual_negative", "actual_positive"],
         columns=["predicted_negative", "predicted_positive"],
     )
-    save_csv(cm_df, os.path.join(out_dir, f"confusion_matrix_{thresh}.csv"))
+    save_csv(cm_df, os.path.join(out_dir, "confusion_matrix.csv"))
 
     # --- Raw predictions & probabilities ---
     preds_df = pd.DataFrame({
@@ -391,7 +416,7 @@ def main(model_key):
         print("  NOTE: Model does not expose feature importances — skipping.")
 
     print(f"\nDone. All outputs saved to: {out_dir}/")
-    print(f"  Threshold-sensitive : metrics_{thresh}.json, confusion_matrix_{thresh}.csv")
+    print(f"  Threshold-sensitive  : metrics.json (threshold={thresh}), confusion_matrix.csv")
     print(f"  Threshold-independent: predictions.csv, pr_curve.csv, roc_curve.csv, feature_importance.csv")
     print(f"  Tuning outputs       : best_params.json, cv_results.csv")
 

@@ -39,6 +39,13 @@ METRICS = [
     ("roc_auc",           "ROC AUC",            (0, 1)),
 ]
 
+# Font sizes — large for print/paper
+TITLE_FONTSIZE  = 12
+LABEL_FONTSIZE  = 15
+TICK_FONTSIZE   = 12
+ANNOT_FONTSIZE  = 13
+LEGEND_FONTSIZE = 13
+
 # Color palette — one color per model, publication-friendly
 COLOR_PALETTE = "colorblind"   # seaborn colorblind-safe palette
 
@@ -116,7 +123,7 @@ def plot_model_comparison(
             color=sorted_colors,
             edgecolor="white",
             linewidth=0.6,
-            height=0.6,
+            height=0.5,
         )
 
         # Value labels at end of each bar
@@ -131,23 +138,22 @@ def plot_model_comparison(
                 label,
                 va="center",
                 ha="left",
-                fontsize=7,
+                fontsize=ANNOT_FONTSIZE,
                 color="#333333",
             )
 
         ax.set_yticks(y_pos)
-        ax.set_yticklabels(sorted_names, fontsize=8)
-        ax.set_xlabel(metric_label, fontsize=8)
+        ax.set_yticklabels(sorted_names, fontsize=TICK_FONTSIZE)
         ax.set_xlim(x_range[0], x_range[1] + (x_range[1] - x_range[0]) * 0.12)
-        ax.tick_params(axis="x", labelsize=7)
+        ax.tick_params(axis="x", labelsize=TICK_FONTSIZE)
 
-        # Highlight MCC subplot as primary metric
+        # All subplot titles bold
+        ax.set_title(metric_label, fontsize=TITLE_FONTSIZE, fontweight="bold",
+                     color="#1a1a2e")
+
+        # Reference line at 0 for MCC
         if metric_key == "matthews_corrcoef":
-            ax.set_title(metric_label, fontsize=9, fontweight="bold",
-                         color="#1a1a2e")
             ax.axvline(0, color="grey", linewidth=0.8, linestyle="--", alpha=0.6)
-        else:
-            ax.set_title(metric_label, fontsize=9, color="#333333")
 
         # Reference line at 0.5 for accuracy-like metrics
         if metric_key in ("balanced_accuracy", "roc_auc", "average_precision"):
@@ -166,17 +172,18 @@ def plot_model_comparison(
         title="Model",
         loc="lower center",
         ncol=min(n_models, 4),
-        fontsize=7,
-        title_fontsize=8,
+        fontsize=LEGEND_FONTSIZE,
+        title_fontsize=LEGEND_FONTSIZE,
         frameon=False,
-        bbox_to_anchor=(0.5, -0.02),
+        bbox_to_anchor=(0.5, 0.04),
     )
 
     # --- Super title ---
     if title:
-        fig.suptitle(title, fontsize=11, fontweight="bold", y=1.01)
+        fig.suptitle(title, fontsize=TITLE_FONTSIZE + 4, fontweight="bold", y=1.01)
 
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0.10, 1, 1])
+    fig.subplots_adjust(hspace=0.4)
 
     # --- Save ---
     for fmt in OUTPUT_FORMATS:

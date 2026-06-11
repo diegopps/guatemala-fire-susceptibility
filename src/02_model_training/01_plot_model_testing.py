@@ -4,11 +4,14 @@
 Caller script for comparing all baseline models from the model testing step.
 
 This script:
+  0. Loads metrics.json at the default threshold (0.5) for all models
+     → calls plot_model_comparison() for a single 4-panel overview figure.
   1. Loads metrics.json for each model → calls plot_model_comparison().
   2. Loads confusion_matrix.csv for each model → calls plot_confusion_matrix().
   3. Loads pr_curve.csv for each model → calls plot_pr_curve().
   4. Loads roc_curve.csv for each model → calls plot_roc_curve().
   5. Loads feature_importance.csv for each model (if available) → calls plot_feature_importance().
+  6. Loads MCC across all model × threshold combinations → calls plot_mcc_heatmap().
 
 To compare a different subset of models in the future (e.g. only RF and XGB),
 create a new caller script — do NOT modify the plotter modules in utils/.
@@ -33,8 +36,9 @@ MODELS_TO_PLOT = [
     "naive_bayes",
 ]
 
-FILENAME_PREFIX = "baseline_model_comparison"
-PLOT_TITLE      = "Baseline Model Comparison — All Models"
+FILENAME_PREFIX  = "baseline_model_comparison"
+PLOT_TITLE       = "Baseline Model Comparison — All Models"
+DEFAULT_THRESHOLD = 0.5   # Used for the overview comparison plot (step 0)
 
 # Thresholds to plot — must match those used in 01_model_testing.py.
 # One set of threshold-sensitive figures (metrics, confusion matrix) is
@@ -58,6 +62,7 @@ from plot_confmatrix import plot_confusion_matrix
 from plot_prcurve import plot_pr_curve
 from plot_roccurve import plot_roc_curve
 from plot_featimportance import plot_feature_importance
+from plot_mcc_heatmap import plot_mcc_heatmap
 
 # =============================================================================
 # HELPERS
@@ -83,6 +88,31 @@ def load_metrics(model_name, threshold):
 # =============================================================================
 
 def main():
+
+    # -------------------------------------------------------------------------
+    # 0. Overview comparison — all models, 4 metrics, default threshold (0.5)
+    # -------------------------------------------------------------------------
+    section(f"Plotting overview comparison at default threshold ({DEFAULT_THRESHOLD})...")
+
+    overview_metrics = []
+    for model_name in MODELS_TO_PLOT:
+        metrics = load_metrics(model_name, DEFAULT_THRESHOLD)
+        if metrics is None:
+            print(f"  WARNING: metrics_{DEFAULT_THRESHOLD}.json not found for '{model_name}' — skipping.")
+            continue
+        metrics.setdefault("model", model_name)
+        overview_metrics.append(metrics)
+        print(f"  Loaded metrics for: {model_name}")
+
+    if overview_metrics:
+        plot_model_comparison(
+            metrics_list    = overview_metrics,
+            output_dir      = OUTPUT_DIR,
+            filename_prefix = f"{FILENAME_PREFIX}_overview_t{DEFAULT_THRESHOLD}",
+            title           = f"{PLOT_TITLE} (threshold={DEFAULT_THRESHOLD})",
+        )
+    else:
+        print("  WARNING: No metrics loaded — overview plot skipped.")
 
     # -------------------------------------------------------------------------
     # 1. Metrics bar plot — all models compared, one figure per threshold
@@ -232,6 +262,30 @@ def main():
             model_name=model_name,
             output_dir=OUTPUT_DIR,
         )
+
+    # -------------------------------------------------------------------------
+    # 6. MCC heatmap — all models × all thresholds
+    # -------------------------------------------------------------------------
+    section("Plotting MCC heatmap (model × threshold)...")
+
+    mcc_matrix = {}
+    for model_name in MODELS_TO_PLOT:
+        mcc_matrix[model_name] = {}
+        for thresh in THRESHOLDS:
+            metrics = load_metrics(model_name, thresh)
+            if metrics is None:
+                print(f"  WARNING: metrics_{thresh}.json not found for '{model_name}' — cell will be NaN.")
+                mcc_matrix[model_name][thresh] = None
+            else:
+                mcc_matrix[model_name][thresh] = metrics.get("matthews_corrcoef")
+
+    plot_mcc_heatmap(
+        mcc_matrix = mcc_matrix,
+        thresholds = THRESHOLDS,
+        output_dir = OUTPUT_DIR,
+        filename   = f"{FILENAME_PREFIX}_mcc_heatmap",
+        title      = f"{PLOT_TITLE} — MCC by Threshold",
+    )
 
     print("\nAll plots complete.")
 

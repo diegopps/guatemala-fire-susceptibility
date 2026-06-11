@@ -1,17 +1,22 @@
 """
 04_final_model_training.py
 ---------------------------
-Trains the final models using the best
-hyperparameters found in step 03, with the best sampler from step 02
-applied to the training set.
+Trains the final models using the BASE (default) hyperparameters — the same
+ones used in step 02 — with the best sampler identified in step 02 applied to
+the training set. Hyperparameter tuning (step 03) is NOT used: it produced no
+improvement over the defaults, so the final models are exactly the step-02 base
+models, retrained here on the full training set and saved for downstream use.
 
-  1. Loads best_params.json from step 03 results.
-  2. Resamples the training set using the best sampler (same as step 03).
-  3. Retrains the model from scratch on the resampled training set using
-     the best hyperparameters.
-  4. Saves the fitted model as a .joblib file under models/.
-  5. Generates predictions on both the test set and the validation set
-     (the validation set is used here for the first time). 
+  1. Resamples the training set using the best sampler from step 02.
+  2. Trains the model from scratch on the resampled training set using the base
+     hyperparameters (defaults — identical to step 02; no best_params.json read).
+  3. Saves the fitted model as a .joblib file under models/.
+  4. Commits the decision threshold as the one maximizing MCC on the TEST set
+     (consistent with steps 02/03), saved in training_info.json.
+  5. Generates predictions on the train, test and validation subsets
+     (the validation set is used here for the first time), evaluating every
+     subset at the same committed threshold — never re-tuned on validation, so
+     the blind validation result is honest.
   6. Saves all outputs (predictions, metrics, PR/ROC curves, confusion
      matrix, feature importance) separately for each subset.
 
@@ -40,7 +45,6 @@ PROJECT_DIR      = "/home/diegopab/projects/ForestFire_GT/paperwriting/ForestFir
 INPUT_DATA_PATH  = f"{PROJECT_DIR}/data/indata/data_trainingset_2017-2024/allvars_2017-2024.csv"
 SPLIT_INDEX_PATH = f"{PROJECT_DIR}/data/processed/split_index.csv"
 OUTPUT_DIR       = f"{PROJECT_DIR}/results/04_final_model_training/"
-TUNING_DIR       = f"{PROJECT_DIR}/results/03_hyperparameter_tuning/"
 MODELS_DIR       = f"{PROJECT_DIR}/models/"
 
 # Features to use (fire is always excluded as target; lat, lon, year excluded)
@@ -56,19 +60,17 @@ TARGET_COLUMN = "fire"
 
 RANDOM_SEED = 42
 
-# Custom threshold per model — same as step 03.
-# Used for threshold-sensitive outputs (metrics, confusion matrix).
-# PR/ROC curves and feature importance are threshold-independent.
-MODEL_THRESHOLDS = {
-    "random_forest": 0.03,
-    "xgboost":       0.01,
-    "extra_trees":   0.03,
-}
+# No fixed decision threshold. The committed operating point is selected ONCE as
+# the threshold that maximizes MCC on the TEST set (consistent with steps 02/03),
+# saved in training_info.json, and then applied UNCHANGED to every subset
+# (train, test, val). The threshold is never re-tuned on the validation set, so
+# the blind validation result stays an honest estimate at the pre-committed
+# operating point. PR/ROC curves and feature importance are threshold-independent.
 
 # ---------------------------------------------------------------------------
 # Models
-# base_params are fixed (not tuned). Best hyperparameters from step 03
-# are loaded from best_params.json and merged in at runtime.
+# base_params are the BASE (default) hyperparameters — identical to step 02.
+# No tuning is applied (step 03 gave no improvement), so these are used as-is.
 # NOTE: No class_weight or scale_pos_weight — resampling handles imbalance.
 # ---------------------------------------------------------------------------
 MODELS = {
@@ -76,6 +78,7 @@ MODELS = {
         "short":       "RF",
         "class":       "sklearn.ensemble.RandomForestClassifier",
         "base_params": {
+            "n_estimators": 100,
             "random_state": RANDOM_SEED,
             "n_jobs":       -1,
         },
@@ -84,6 +87,7 @@ MODELS = {
         "short":       "XGB",
         "class":       "xgboost.XGBClassifier",
         "base_params": {
+            "n_estimators":      100,
             "use_label_encoder": False,
             "eval_metric":       "logloss",
             "random_state":      RANDOM_SEED,
@@ -94,6 +98,7 @@ MODELS = {
         "short":       "XT",
         "class":       "sklearn.ensemble.ExtraTreesClassifier",
         "base_params": {
+            "n_estimators": 100,
             "random_state": RANDOM_SEED,
             "n_jobs":       -1,
         },
@@ -101,12 +106,12 @@ MODELS = {
 }
 
 # ---------------------------------------------------------------------------
-# Best sampler per model — same as step 03.
+# Best sampler per model — identified in step 02 (same as step 03).
 # ---------------------------------------------------------------------------
 MODEL_BEST_SAMPLERS = {
     "random_forest": {
-        "key":    "ros",
-        "class":  "imblearn.over_sampling.RandomOverSampler",
+        "key":    "rus",
+        "class":  "imblearn.under_sampling.RandomUnderSampler",
         "params": {"random_state": RANDOM_SEED},
     },
     "xgboost": {
@@ -115,8 +120,8 @@ MODEL_BEST_SAMPLERS = {
         "params": {"n_jobs": -1},
     },
     "extra_trees": {
-        "key":    "svmsmote",
-        "class":  "imblearn.over_sampling.SVMSMOTE",
+        "key":    "rus",
+        "class":  "imblearn.under_sampling.RandomUnderSampler",
         "params": {"random_state": RANDOM_SEED},
     },
 }
@@ -141,6 +146,9 @@ from sklearn.metrics import (
     precision_recall_curve,
     roc_curve,
 )
+
+sys.path.append(os.path.join(PROJECT_DIR, "src", "utils"))
+from threshold_selection import select_threshold_on_validation
 
 # =============================================================================
 # HELPERS
@@ -195,18 +203,6 @@ def load_data():
     return X_train, y_train, X_test, y_test, X_val, y_val, mapping_train, mapping_test, mapping_val
 
 
-def load_best_params(model_short):
-    """Load best hyperparameters from step 03 output."""
-    path = os.path.join(TUNING_DIR, model_short, "best_params.json")
-    if not os.path.exists(path):
-        print(f"ERROR: best_params.json not found at {path}")
-        sys.exit(1)
-    with open(path, "r") as f:
-        params = json.load(f)
-    print(f"  Loaded best params from: {path}")
-    return params
-
-
 def save_json(data, path):
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
@@ -258,7 +254,7 @@ def evaluate_and_save(model, X, y, mapping, thresh, subset_label, out_dir):
     print(f"    Average Precision : {avg_prec:.4f}" if avg_prec is not None else "    Average Precision : N/A")
     print(f"    ROC AUC           : {roc_auc:.4f}"  if roc_auc  is not None else "    ROC AUC           : N/A")
 
-    save_json(metrics, os.path.join(out_dir, f"metrics_{thresh}_{subset_label}.json"))
+    save_json(metrics, os.path.join(out_dir, f"metrics_{subset_label}.json"))
 
     # --- Confusion matrix ---
     cm = confusion_matrix(y, y_pred_t)
@@ -267,7 +263,7 @@ def evaluate_and_save(model, X, y, mapping, thresh, subset_label, out_dir):
         index=["actual_negative", "actual_positive"],
         columns=["predicted_negative", "predicted_positive"],
     )
-    save_csv(cm_df, os.path.join(out_dir, f"confusion_matrix_{thresh}_{subset_label}.csv"))
+    save_csv(cm_df, os.path.join(out_dir, f"confusion_matrix_{subset_label}.csv"))
 
     # --- Raw predictions & probabilities ---
     preds_df = pd.DataFrame({
@@ -330,7 +326,6 @@ def main(model_key):
     model_config   = MODELS[model_key]
     model_short    = model_config["short"]
     sampler_config = MODEL_BEST_SAMPLERS[model_key]
-    thresh         = MODEL_THRESHOLDS[model_key]
 
     out_dir = os.path.join(OUTPUT_DIR, model_short)
     os.makedirs(out_dir, exist_ok=True)
@@ -342,65 +337,92 @@ def main(model_key):
     print(f"Output  : {out_dir}")
     print(f"{'='*60}\n")
 
-    # --- Load data ---
+    model_path = os.path.join(MODELS_DIR, f"{model_short}_final.joblib")
+
+    # --- Load data (needed in both branches) ---
     X_train, y_train, X_test, y_test, X_val, y_val, mapping_train, mapping_test, mapping_val = load_data()
 
-    # --- Load best hyperparameters from step 03 ---
-    print("\nLoading best hyperparameters from step 03...")
-    best_params = load_best_params(model_short)
-    print(f"  Best params: {best_params}")
+    if not os.path.exists(model_path):
+        # ------------------------------------------------------------------ #
+        # TRAINING BRANCH — train, save, then run blind validation           #
+        # ------------------------------------------------------------------ #
+        print(f"\nNo saved model found at {model_path}. Running training...")
 
-    # --- Resample training set only ---
-    print(f"\nApplying resampler: {sampler_config['key']}...")
-    sampler_cls = load_class(sampler_config["class"])
-    sampler     = sampler_cls(**sampler_config["params"])
-    X_train_res, y_train_res = sampler.fit_resample(X_train, y_train)
+        # --- Resample training set only ---
+        print(f"\nApplying resampler: {sampler_config['key']}...")
+        sampler_cls = load_class(sampler_config["class"])
+        sampler     = sampler_cls(**sampler_config["params"])
+        X_train_res, y_train_res = sampler.fit_resample(X_train, y_train)
 
-    n_neg_res = (y_train_res == 0).sum()
-    n_pos_res = (y_train_res == 1).sum()
-    print(f"  Post-resampling — negatives: {n_neg_res:,} | positives: {n_pos_res:,}")
-    print(f"  Total training samples     : {len(y_train_res):,}")
+        n_neg_res = (y_train_res == 0).sum()
+        n_pos_res = (y_train_res == 1).sum()
+        print(f"  Post-resampling — negatives: {n_neg_res:,} | positives: {n_pos_res:,}")
+        print(f"  Total training samples     : {len(y_train_res):,}")
 
-    # --- Build final model with best params merged into base params ---
-    print(f"\nTraining final {model_key} with best hyperparameters...")
-    model_cls    = load_class(model_config["class"])
-    final_params = {**model_config["base_params"], **best_params}
-    model        = model_cls(**final_params)
-    model.fit(X_train_res, y_train_res)
-    print("  Training complete.")
+        # --- Build final model with BASE hyperparameters (defaults, identical to
+        # step 02). No tuning is applied — step 03 gave no improvement, so the
+        # final model is exactly the step-02 base model. ---
+        print(f"\nTraining final {model_key} with base (default) hyperparameters...")
+        model_cls    = load_class(model_config["class"])
+        final_params = dict(model_config["base_params"])
+        model        = model_cls(**final_params)
+        model.fit(X_train_res, y_train_res)
+        print("  Training complete.")
 
-    # --- Save fitted model ---
-    model_path = os.path.join(MODELS_DIR, f"{model_short}_final.joblib")
-    joblib.dump(model, model_path)
-    print(f"  Model saved: {model_path}")
+        # --- Save fitted model ---
+        joblib.dump(model, model_path)
+        print(f"  Model saved: {model_path}")
 
-    # --- Save training info ---
-    training_info = {
-        "model":                 model_key,
-        "model_short":           model_short,
-        "sampler":               sampler_config["key"],
-        "threshold":             thresh,
-        "final_params":          final_params,
-        "train_neg_original":    int((y_train == 0).sum()),
-        "train_pos_original":    int((y_train == 1).sum()),
-        "train_neg_resampled":   int(n_neg_res),
-        "train_pos_resampled":   int(n_pos_res),
-        "model_path":            model_path,
-    }
-    save_json(training_info, os.path.join(out_dir, "training_info.json"))
+        # --- Commit the operating point: threshold maximizing MCC on the TEST
+        # set (consistent with steps 02/03). Persisted and reused unchanged for
+        # all subsets, so blind validation is evaluated at a pre-committed cut. ---
+        test_prob   = model.predict_proba(X_test)[:, 1]
+        thresh, _   = select_threshold_on_validation(y_test, test_prob)
+        print(f"\n  Committed threshold (max MCC on test): {thresh:.6f}")
 
-    # --- Evaluate on train set  (For use in the Jenks classification step) ---
-    evaluate_and_save(model, X_train, y_train, mapping_train, thresh, "train", out_dir)
+        # --- Save training info ---
+        training_info = {
+            "model":                 model_key,
+            "model_short":           model_short,
+            "sampler":               sampler_config["key"],
+            "hyperparameters":       "base defaults (no tuning; identical to step 02 base model)",
+            "threshold":             thresh,
+            "final_params":          final_params,
+            "train_neg_original":    int((y_train == 0).sum()),
+            "train_pos_original":    int((y_train == 1).sum()),
+            "train_neg_resampled":   int(n_neg_res),
+            "train_pos_resampled":   int(n_pos_res),
+            "model_path":            model_path,
+        }
+        save_json(training_info, os.path.join(out_dir, "training_info.json"))
 
-    # --- Evaluate on test set ---
-    evaluate_and_save(model, X_test, y_test, mapping_test, thresh, "test", out_dir)
+        # --- Evaluate on train and test sets ---
+        evaluate_and_save(model, X_train, y_train, mapping_train, thresh, "train", out_dir)
+        evaluate_and_save(model, X_test,  y_test,  mapping_test,  thresh, "test",  out_dir)
 
-    # --- Evaluate on validation set (first time this set is used) ---
+    else:
+        # ------------------------------------------------------------------ #
+        # VALIDATION-ONLY BRANCH — model already exists, load it             #
+        # ------------------------------------------------------------------ #
+        print(f"\nFound saved model at {model_path}. Loading for blind validation...")
+        model = joblib.load(model_path)
+        print("  Model loaded.")
+
+        # --- Reuse the committed threshold from training (never re-tuned here) ---
+        info_path = os.path.join(out_dir, "training_info.json")
+        if not os.path.exists(info_path):
+            print(f"ERROR: training_info.json not found at {info_path}; "
+                  "cannot recover the committed threshold. Retrain first.")
+            sys.exit(1)
+        with open(info_path, "r") as f:
+            thresh = json.load(f)["threshold"]
+        print(f"  Committed threshold loaded: {thresh:.6f}")
+
+    # --- Blind validation (always runs) ---
     evaluate_and_save(model, X_val, y_val, mapping_val, thresh, "val", out_dir)
 
     print(f"\n{'='*60}")
     print(f"Done. All outputs saved to : {out_dir}/")
-    print(f"Trained model saved to     : {model_path}")
     print(f"{'='*60}")
 
 

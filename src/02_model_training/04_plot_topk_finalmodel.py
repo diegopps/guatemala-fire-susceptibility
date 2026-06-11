@@ -16,8 +16,8 @@ This script:
   5. Loads feature_importance.csv for each model → calls plot_feature_importance()
      once per model (3 figures total, threshold-independent).
   6. Loads predictions.csv for each model (test + val), computes top-k coverage
-     at k = 1%, 2%, 5%, 10% → calls plot_topk_coverage() once per k level per
-     subset (8 figures total).
+     at k = 1%, 2%, 5%, 10% → calls plot_topk_coverage() once per subset
+     (2 figures total), each showing all k levels as grouped bars per model.
 
 Output naming convention:
   - Metrics comparison : final_model_comparison_<subset>.<ext>
@@ -83,15 +83,10 @@ def model_dir(model_short):
 
 
 def load_metrics(model_short, subset_label):
-    """Load metrics JSON for a given model and subset."""
-    directory = model_dir(model_short)
-    # Auto-detect threshold from filename: metrics_<thresh>_<subset>.json
-    matches = [f for f in os.listdir(directory)
-               if f.startswith("metrics_") and f.endswith(f"_{subset_label}.json")] \
-              if os.path.isdir(directory) else []
-    if not matches:
+    """Load metrics_<subset>.json (threshold is stored inside, under 'threshold')."""
+    path = os.path.join(model_dir(model_short), f"metrics_{subset_label}.json")
+    if not os.path.exists(path):
         return None
-    path = os.path.join(directory, matches[0])
     with open(path, "r") as f:
         return json.load(f)
 
@@ -170,7 +165,7 @@ def main():
             metrics_list=metrics_list,
             output_dir=OUTPUT_DIR,
             filename_prefix=f"final_model_comparison_{subset}",
-            title=f"Final Model Comparison — {subset.capitalize()} Set",
+            title=f"Final Model Comparison — {subset.capitalize()} Set (MCC at committed threshold)",
         )
 
     # -------------------------------------------------------------------------
@@ -180,29 +175,33 @@ def main():
 
     for model_key, model_short in MODELS.items():
         for subset in SUBSETS:
-            directory  = model_dir(model_short)
-            cm_matches = [f for f in os.listdir(directory)
-                          if f.startswith("confusion_matrix_") and f.endswith(f"_{subset}.csv")] \
-                         if os.path.isdir(directory) else []
+            directory = model_dir(model_short)
+            cm_path   = os.path.join(directory, f"confusion_matrix_{subset}.csv")
 
-            if not cm_matches:
-                print(f"  WARNING: confusion_matrix_*_{subset}.csv not found for "
+            if not os.path.exists(cm_path):
+                print(f"  WARNING: confusion_matrix_{subset}.csv not found for "
                       f"'{model_short}' — skipping.")
                 continue
 
-            cm_path = os.path.join(directory, cm_matches[0])
-            cm_df   = pd.read_csv(cm_path)
-            cm      = np.column_stack([
+            cm_df = pd.read_csv(cm_path)
+            cm    = np.column_stack([
                 cm_df["predicted_negative"].values,
                 cm_df["predicted_positive"].values,
             ])
 
             label = f"{model_short}_final_{subset}"
+            # Show the committed (MCC-optimal) threshold in the title; keep the
+            # filename clean so re-runs overwrite cleanly.
+            metrics    = load_metrics(model_short, subset)
+            thresh     = metrics.get("threshold") if metrics else None
+            title_name = f"{label} (thr={thresh:.4g})" if thresh is not None else label
+
             print(f"  Plotting confusion matrix for: {label}")
             plot_confusion_matrix(
                 cm=cm,
-                model_name=label,
+                model_name=title_name,
                 output_dir=OUTPUT_DIR,
+                filename_prefix=f"confusion_matrix_{label}",
             )
 
     # -------------------------------------------------------------------------

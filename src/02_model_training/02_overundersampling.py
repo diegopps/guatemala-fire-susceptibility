@@ -41,14 +41,12 @@ FEATURE_COLUMNS = [
 
 TARGET_COLUMN = "fire"
 
-# Custom threshold per model, chosen based on 01_model_testing exploration.
-# Used for saving threshold-sensitive outputs (metrics, confusion matrix).
-# PR/ROC curves and feature importance are threshold-independent and unaffected.
-MODEL_THRESHOLDS = {
-    "random_forest": 0.03,
-    "xgboost":       0.01,
-    "extra_trees":   0.03,
-}
+# No fixed decision threshold is used. The threshold is a post-hoc operating
+# point, so each run is reported at the threshold that MAXIMIZES its MCC (the
+# peak of its MCC-vs-threshold curve). This keeps MCC as the metric while
+# avoiding the bias of comparing models at one shared, model-mismatched cut.
+# The chosen threshold is saved inside metrics.json. PR/ROC curves and feature
+# importance are threshold-independent and unaffected.
 
 # ---------------------------------------------------------------------------
 # Models
@@ -154,6 +152,9 @@ from sklearn.metrics import (
     precision_recall_curve,
     roc_curve,
 )
+
+sys.path.append(os.path.join(PROJECT_DIR, "src", "utils"))
+from threshold_selection import select_threshold_on_validation
 
 # =============================================================================
 # HELPERS
@@ -284,10 +285,17 @@ def main(model_key, sampler_key):
         y_prob = None
         print("  WARNING: Model does not support probability estimates.")
 
-    # --- Metrics and confusion matrix — saved at model-specific threshold ---
+    # --- Metrics and confusion matrix — reported at the MCC-optimal threshold ---
+    # The threshold is selected as the peak of the MCC-vs-threshold curve on the
+    # test predictions (a single scalar, negligible optimism) so the model is
+    # read at its own optimal operating point rather than a fixed shared cut.
     print("\nComputing metrics...")
-    thresh   = MODEL_THRESHOLDS[model_key]
-    y_pred_t = (y_prob >= thresh).astype(int) if y_prob is not None else y_pred
+    if y_prob is not None:
+        thresh, _ = select_threshold_on_validation(y_test, y_prob)
+        print(f"  Optimal threshold (max MCC): {thresh:.6f}")
+        y_pred_t = (y_prob >= thresh).astype(int)
+    else:
+        thresh, y_pred_t = None, y_pred
 
     bal_acc  = balanced_accuracy_score(y_test, y_pred_t)
     mcc      = matthews_corrcoef(y_test, y_pred_t)
@@ -315,7 +323,7 @@ def main(model_key, sampler_key):
     print(f"  Average Precision : {avg_prec:.4f}" if avg_prec is not None else "  Average Precision : N/A")
     print(f"  ROC AUC           : {roc_auc:.4f}"  if roc_auc  is not None else "  ROC AUC           : N/A")
 
-    save_json(metrics, os.path.join(out_dir, f"metrics_{thresh}.json"))
+    save_json(metrics, os.path.join(out_dir, "metrics.json"))
 
     # --- Confusion matrix ---
     cm = confusion_matrix(y_test, y_pred_t)
@@ -324,7 +332,7 @@ def main(model_key, sampler_key):
         index=["actual_negative", "actual_positive"],
         columns=["predicted_negative", "predicted_positive"],
     )
-    save_csv(cm_df, os.path.join(out_dir, f"confusion_matrix_{thresh}.csv"))
+    save_csv(cm_df, os.path.join(out_dir, "confusion_matrix.csv"))
 
     # --- Raw predictions & probabilities ---
     preds_df = pd.DataFrame({

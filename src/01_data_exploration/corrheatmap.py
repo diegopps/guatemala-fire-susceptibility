@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import numpy as np
 import seaborn as sns
@@ -6,19 +7,19 @@ import matplotlib.pyplot as plt
 # -----------------------------
 # 1. Load data
 # -----------------------------
-df = pd.read_csv("/home/diegopab/projects/ForestFire_GT/paperwriting/data/data_trainingset_2017-2024/allvars_2017-2024_v2.csv")
+df = pd.read_csv("/home/diegopab/projects/ForestFire_GT/paperwriting/ForestFireGT/data/indata/data_trainingset_2017-2024/allvars_2017-2024.csv" )
 
 # -----------------------------
 # 2. Clean dataset
 # -----------------------------
 # Drop non-informative / indexing columns
-drop_cols = ["lat", "lon", "month", "year"]
+drop_cols = ["lat", "lon", "month", "year", "fire"]
 df = df.drop(columns=drop_cols, errors="ignore")
 
 # Optional: rename variables for nicer labels (recommended for paper)
 rename_dict = {
     "pr": "Precipitation",
-    "tas": "Temperature",
+    "tas": "Mean Temp",
     "tasmax": "Max Temp",
     "tasmin": "Min Temp",
     "rsds": "Solar Radiation",
@@ -64,8 +65,8 @@ heatmap = sns.heatmap(
 )
 
 # Improve labels
-plt.xticks(rotation=45, ha="right", fontsize=10)
-plt.yticks(rotation=0, fontsize=10)
+plt.xticks(rotation=45, ha="right", fontsize=12)
+plt.yticks(rotation=0, fontsize=12)
 
 # Title (keep subtle for publications)
 plt.title("Pearson Correlation Matrix", fontsize=14)
@@ -75,6 +76,7 @@ plt.tight_layout()
 # -----------------------------
 # 5. Save figure
 # -----------------------------
-plt.savefig("./figures/correlation_heatmap.png", dpi=300, bbox_inches="tight")
+os.makedirs("../../figures/01_data_exploration", exist_ok=True)
+plt.savefig("../../figures/01_data_exploration/correlation_heatmap.png", dpi=300, bbox_inches="tight")
 
 plt.show()

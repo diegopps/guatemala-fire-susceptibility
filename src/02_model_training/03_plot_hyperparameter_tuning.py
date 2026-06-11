@@ -39,7 +39,7 @@ MODELS = {
 }
 
 FILENAME_PREFIX = "tuned_model_comparison"
-PLOT_TITLE      = "Tuned Model Comparison — RF, XGB, XT"
+PLOT_TITLE      = "Tuned Model Comparison — RF, XGB, XT (MCC at optimal threshold)"
 
 # =============================================================================
 # IMPORTS
@@ -75,14 +75,10 @@ def model_dir(model_short):
 
 
 def load_metrics(model_short):
-    """Load metrics JSON, auto-detecting the threshold suffix from the filename."""
-    directory = model_dir(model_short)
-    matches = [f for f in os.listdir(directory)
-               if f.startswith("metrics_") and f.endswith(".json")] \
-              if os.path.isdir(directory) else []
-    if not matches:
+    """Load metrics.json (threshold is stored inside, under 'threshold')."""
+    path = os.path.join(model_dir(model_short), "metrics.json")
+    if not os.path.exists(path):
         return None
-    path = os.path.join(directory, matches[0])
     with open(path, "r") as f:
         return json.load(f)
 
@@ -130,27 +126,31 @@ def main():
 
     for model_key, model_short in MODELS.items():
         directory = model_dir(model_short)
-        cm_matches = [f for f in os.listdir(directory)
-                      if f.startswith("confusion_matrix_") and f.endswith(".csv")] \
-                     if os.path.isdir(directory) else []
+        cm_path   = os.path.join(directory, "confusion_matrix.csv")
 
-        if not cm_matches:
-            print(f"  WARNING: confusion_matrix_*.csv not found for '{model_short}' — skipping.")
+        if not os.path.exists(cm_path):
+            print(f"  WARNING: confusion_matrix.csv not found for '{model_short}' — skipping.")
             continue
 
-        cm_path = os.path.join(directory, cm_matches[0])
-        cm_df   = pd.read_csv(cm_path)
-        cm      = np.column_stack([
+        cm_df = pd.read_csv(cm_path)
+        cm    = np.column_stack([
             cm_df["predicted_negative"].values,
             cm_df["predicted_positive"].values,
         ])
 
         label = f"{model_short}_tuned"
+        # Show the reported (MCC-optimal) threshold in the title; keep the
+        # filename clean so re-runs overwrite cleanly.
+        metrics    = load_metrics(model_short)
+        thresh     = metrics.get("threshold") if metrics else None
+        title_name = f"{label} (thr={thresh:.4g})" if thresh is not None else label
+
         print(f"  Plotting confusion matrix for: {label}")
         plot_confusion_matrix(
             cm=cm,
-            model_name=label,
+            model_name=title_name,
             output_dir=OUTPUT_DIR,
+            filename_prefix=f"confusion_matrix_{label}",
         )
 
     # -------------------------------------------------------------------------

@@ -1,20 +1,10 @@
-# ForestFireGT 🌲🔥
+# ForestFireGT
 
-A reproducible machine learning pipeline for forest fire risk prediction in Guatemala, developed alongside a scientific publication.
-
----
-
-## Overview
-
-This repository contains a structured ML pipeline that trains and evaluates binary classifiers to predict fire occurrence using environmental, climatic, and topographic features. The pipeline is designed for reproducibility and scientific transparency, with outputs compatible with publication-quality figures.
-
-**Target variable:** `fire` (binary: 0 = no fire, 1 = fire)  
-**Class imbalance:** ~0.05% positive rate (~5,360 fires vs. ~11,046,352 non-fire observations)  
-**Primary metric:** Matthews Correlation Coefficient (MCC)
+A reproducible Python-based machine learning pipeline for forest fire risk prediction and susceptibility mapping in Guatemala. Developed alongside a scientific paper, and structured for open-source publication.
 
 ---
 
-## Repository Structure
+## Project Structure
 
 ```
 ForestFireGT/
@@ -22,25 +12,18 @@ ForestFireGT/
 ├── requirements.txt
 ├── .gitignore
 ├── data/
-│   ├── raw/                        # allvars_2017-2024.csv (input data)
-│   └── processed/                  # split_index.csv
+│   ├── indata/                       # allvars_2017-2024.csv (input data)
+│   └── processed/                    # split_index.csv
 ├── src/
-│   ├── utils/                      # Reusable plotter modules
-│   ├── 01_exploration/
-│   ├── 02_model_training/          # Main pipeline scripts
-│   ├── 03_model_validation/
-│   ├── 04_fire_risk_validation/
-│   └── 05_future_predictions/
+│   ├── utils/                        # Reusable plotter and utility modules
+│   └── 02_model_training/            # All pipeline scripts
 ├── results/
-│   └── 01_model_testing/
-│       ├── <model_name>/           # One directory per model
-│       │   ├── metrics.json
-│       │   ├── confusion_matrix.csv
-│       │   ├── predictions.csv
-│       │   ├── pr_curve.csv
-│       │   ├── roc_curve.csv
-│       │   └── feature_importance.csv
-│       └── figures/                # All output plots
+│   ├── 01_model_testing/
+│   ├── 02_overundersampling/
+│   ├── 03_hyperparameter_tuning/
+│   ├── 04_final_model_training/
+│   └── 06_risk_maps/
+├── models/                           # Saved .joblib model files
 └── outputs/
 ```
 
@@ -48,82 +31,154 @@ ForestFireGT/
 
 ## Input Data
 
-**File:** `data/raw/allvars_2017-2024.csv`
+**File:** `data/indata/data_trainingset_2017-2024/allvars_2017-2024.csv`
+**Target column:** `fire` (binary: 0/1)
+**Study period:** 2017–2024
+**Class imbalance:** ~5,360 fire events vs ~11,046,352 non-fire cells (~0.05% positive rate)
+**Spatial resolution:** 1 km grid cells (lat/lon represent cell centers)
 
-| Category | Features |
-|---|---|
-| Temporal | `month` |
-| Climate | `PET`, `climbal`, `pr`, `rsds`, `tas`, `tasmax`, `tasmin` |
-| Topography | `aspect_sin`, `aspect_cos`, `elev`, `slope` |
-| Proximity | `distRoads`, `distUrban`, `distWater` |
+**Features used:**
+```
+PET, climbal, pr, rsds, tas, tasmax, tasmin,
+aspect_sin, aspect_cos,
+distRoads, distUrban, distWater,
+elev, slope
+```
 
-> `lat`, `lon`, `year`, and `fire` are excluded from the feature set.
-
----
-
-## Pipeline
-
-### Step 0 — Data Splitting (`split_data.py`)
-
-Splits the dataset into **train (65%) / test (25%) / validation (10%)** using stratified sampling on the target column. Outputs `data/processed/split_index.csv` containing only row indices and split labels — no data duplication.
-
-### Step 1 — Baseline Model Testing (`01_model_testing.py`)
-
-Trains a set of classifiers as a baseline to characterize the class imbalance problem. One SLURM job is submitted per model via `submit_model_jobs.sh`. Each model run saves:
-
-- `metrics.json` — MCC, F1, precision, recall, ROC-AUC, PR-AUC
-- `confusion_matrix.csv`
-- `predictions.csv`
-- `pr_curve.csv` / `roc_curve.csv`
-- `feature_importance.csv`
-
-**Models tested:** Logistic Regression, Naive Bayes, Random Forest, Extra Trees, Gradient Boosting, XGBoost, KNN
-
-**Key finding:** Most tree-based models predict all zeros due to extreme class imbalance. This is expected — the baseline exists to demonstrate the problem and motivate the next step.
-
-> **Note on XGBoost:** `class_weight="balanced"` is not supported by XGBoost. `scale_pos_weight` must be used instead (not yet implemented in this step).
+**Excluded from features:** `lat`, `lon`, `year`, `month`, `fire`
 
 ---
 
-## Reusable Plotters (`src/utils/`)
+## Pipeline Overview
 
-All plotters are standalone functions called by separate caller scripts. Figures are output as **PNG + PDF + SVG at 300 DPI**, styled with `seaborn whitegrid` (vertical gridlines only).
+The pipeline is organized as sequential numbered steps. Each step produces outputs consumed by the next.
 
-| Module | Function | Description |
+### Step 00 — Data Splitting
+**Script:** `00_split_data.py`
+Stratified train (65%) / test (25%) / validation (10%) split preserving the fire class ratio. Outputs `split_index.csv` — only row indices and split labels, no data duplication.
+
+### Step 01 — Baseline Model Testing
+**Script:** `01_model_testing.py <model_name>`
+**Plot script:** `01_plot_model_testing.py`
+**SLURM:** `sbatch_01_model_testing.sh`
+
+Tests 8 baseline classifiers with class weighting as the only imbalance correction:
+`logistic_regression`, `decision_tree`, `random_forest`, `gradient_boosting`, `xgboost`, `extra_trees`, `knn`, `naive_bayes`
+
+Evaluates across multiple thresholds: `[0.01, 0.03, 0.05, 0.08, 0.1, 0.2, 0.3, 0.4, 0.5]`
+
+### Step 02 — Over/Undersampling
+**Script:** `02_overundersampling.py <model_name> <sampler_name>`
+**Plot script:** `02_plot_overundersampling.py`
+**SLURM:** `sbatch_02_overundersampling.sh`
+
+Tests 8 resampling strategies on RF, XGB, and XT (24 combinations). No class weights used — resampling is the only imbalance correction, keeping experiments isolated.
+
+Samplers: `ros`, `smote`, `svmsmote`, `adasyn`, `rus`, `nearmiss`, `tomek`, `ncl`
+
+**Best samplers identified (by ROC AUC / average precision):**
+- RF → `rus` (Random Undersampling)
+- XGB → `ncl` (Neighbourhood Cleaning Rule)
+- XT → `rus` (Random Undersampling)
+
+Selection uses the threshold-independent metrics (ROC AUC, average precision): at this imbalance the peak MCC is nearly flat across samplers and does not discriminate them. Bagging ensembles (RF, XT) rank best with `rus`; boosting (XGB) ranks best with the gentle cleaning rules (`ncl`/`tomek`). `nearmiss` is degenerate (AUC < 0.5) and excluded.
+
+### Step 03 — Hyperparameter Tuning
+**Script:** `03_hyperparameter_tuning.py <model_name>`
+**Plot script:** `03_plot_hyperparameter_tuning.py`
+**SLURM:** `sbatch_03_hyperparameter_tuning.sh`
+
+RandomizedSearchCV, 3-fold CV, 100 iterations. Scored by the **best achievable MCC over thresholds** within each fold (threshold-free), so the search optimizes MCC without locking to a fixed operating point. The best sampler from step 02 is wrapped in an imblearn `Pipeline` so resampling happens inside each CV fold (no leakage into the validation fold). One SLURM job per model (3 total).
+
+Saves `best_params.json` and `cv_results.csv` alongside standard outputs.
+
+**Finding:** tuning produced no improvement over the default hyperparameters for any model (RF, XGB, XT) — test scores were equal or slightly worse, while CV scores were inflated by selection optimism (winner's curse). Step 04 therefore uses the **base** hyperparameters, not the tuned ones.
+
+### Step 04 — Final Model Training
+**Script:** `04_final_model_training.py <model_name>`
+**Plot script:** `04_plot_topk_finalmodel.py`
+**SLURM:** `sbatch_04_final_model_training.sh`
+
+Retrains each model from scratch using the **base (default) hyperparameters** — identical to step 02 — with the best sampler from step 02. The tuned hyperparameters from step 03 are deliberately not used (they gave no improvement), so the final models are exactly the step-02 base models, retrained on the full training set. Evaluates on train, test, and validation sets and saves the fitted model as `.joblib` under `models/`.
+
+The decision threshold is committed once as the value maximizing MCC on the **test** set, saved in `training_info.json`, and applied unchanged to all subsets — never re-tuned on the validation set, so the blind validation result stays honest.
+
+Predictions include `lat`, `lon`, `month`, `year` columns — required for spatial mapping and top-k analysis.
+
+The plot script (`04_plot_topk_finalmodel.py`) also performs **top-k coverage analysis** at k = 1%, 2%, 5%, 10%: the proportion of historical fire events captured within the top-k% of cells ranked by predicted probability.
+
+### Step 05 — Jenks Natural Breaks
+**Script:** `05_compute_jenks.py`
+**SLURM:** `sbatch_05_compute_jenks.sh`
+
+Computes Jenks natural breaks on training set predicted probabilities for each model, producing 5 risk class thresholds (very low → very high). Saves `jenks_breaks.json` per model. Skips if file already exists.
+
+### Step 06 — Risk Map Plotting
+**Script:** `06_plot_risk_maps.py`
+
+Applies Jenks breaks to predictions and produces fire risk classification maps for Guatemala. Each 1km grid cell is rendered as an exact pixel using `pcolormesh()` on a reconstructed 2D raster — no interpolation.
+
+Produces per model per subset:
+- **Seasonal maps** (results section): dry season (Nov–Apr) + wet season (May–Oct)
+- **Monthly climatology maps** (appendix): 12 maps averaged across all years per calendar month
+
+---
+
+## Utility Modules (`src/utils/`)
+
+| File | Function(s) | Description |
 |---|---|---|
-| `plot_metrics.py` | `plot_model_comparison()` | 2×2 subplot comparing all models across key metrics |
-| `plot_confusion_matrix.py` | `plot_confusion_matrix()` | Single-model confusion matrix with proportions and raw counts |
-| `plot_pr_curve.py` | `plot_pr_curve()` | PR curve with no-skill baseline and AP annotation |
-| `plot_roc_curve.py` | `plot_roc_curve()` | ROC curve with diagonal baseline and AUC annotation |
-| `plot_feature_importance.py` | `plot_feature_importance()` | Feature importances (tree-based) or coefficients (linear models) |
+| `threshold_selection.py` | `select_threshold_on_validation()`, `mcc_best_threshold_scorer()` | Select the MCC-optimal decision threshold; threshold-free MCC scorer for hyperparameter search |
+| `plot_metrics.py` | `plot_model_comparison()` | 2×2 bar subplot, one bar per model per metric |
+| `plot_confmatrix.py` | `plot_confusion_matrix()` | Confusion matrix with proportions + raw counts |
+| `plot_confmatrix_panel.py` | `plot_confusion_matrix_panel()` | Confusion matrices arranged in a multi-panel figure |
+| `plot_prcurve.py` | `plot_pr_curve()` | PR curve with no-skill baseline + AP annotation |
+| `plot_roccurve.py` | `plot_roc_curve()` | ROC curve with diagonal baseline + AUC annotation |
+| `plot_featimportance.py` | `plot_feature_importance()` | Tree importances or linear coefficients |
+| `plot_featimportance_panel.py` | `plot_feature_importance_panel()` | Feature importances arranged in a multi-panel figure |
+| `plot_mcc_heatmap.py` | `plot_mcc_heatmap()` | Heatmap of MCC across models × samplers |
+| `plot_topk.py` | `plot_topk_coverage()` | Top-k coverage bar charts, one figure per k level |
+| `jenks_breaks.py` | `compute_jenks_breaks()`, `apply_jenks_breaks()`, `save_breaks()`, `load_breaks()` | Jenks natural breaks computation and application |
+| `plot_risk_map.py` | `plot_risk_map()`, `plot_seasonal_maps()`, `plot_monthly_climatology()` | Spatial fire risk maps for Guatemala |
 
-Caller script: `01_plot_model_testing.py`. To plot a subset of models, copy the caller and edit `MODELS_TO_PLOT`.
-
----
-
-## Design Decisions
-
-- **Split index only:** `split_index.csv` stores row indices and labels only. Downstream scripts load the original CSV and filter by split — no data is duplicated.
-- **Plotter/caller separation:** Plotters in `utils/` are stable and never modified. Callers control what gets plotted and where, and can freely reuse plotters across pipeline steps.
-- **SLURM:** Each model is an independent job submitted via `submit_model_jobs.sh`.
-- **`class_weight="balanced"`** is applied across all `sklearn` models as a baseline imbalance handling strategy.
-- **MCC** is the primary evaluation metric throughout, given the severe class imbalance.
+All plots saved as PNG + PDF + SVG at 300 DPI. Style: seaborn `whitegrid`, publication-ready.
 
 ---
 
-## What's Next
+## Key Design Decisions
 
-```
-src/02_model_training/
-├── 01_model_testing.py          ✅ Done
-├── 01_plot_model_testing.py     ✅ Done
-├── 02_overunder_sampling.py     ← In progress
-├── 03_hyperparameter_tuning.py
-└── plot_performance.py
-```
+- **Split index only:** `split_index.csv` stores row indices and labels — no data duplication across subsets.
+- **Plotter/caller separation:** Utility plotters in `utils/` are generic and never modified. Caller scripts control what gets plotted and where.
+- **No double-correction:** Steps 02–04 use resampling as the only imbalance correction. No `class_weight` or `scale_pos_weight` is combined with resampling.
+- **Primary metric:** Matthews Correlation Coefficient (MCC), reported at each model's MCC-optimal threshold. Model and sampler *selection* uses the threshold-independent ROC AUC and average precision, since peak MCC is too flat to discriminate options at this imbalance.
+- **Threshold handling:** No fixed threshold. Each run is reported at the threshold that maximizes its MCC (the peak of its MCC-vs-threshold curve), selected via `utils/threshold_selection.py` and stored inside the metrics JSON under `"threshold"`. Threshold-sensitive outputs use fixed filenames (`metrics.json`, `confusion_matrix.csv`; with a `_<subset>` suffix in step 04). PR/ROC curves and feature importance are threshold-independent and saved once per run.
+- **Validation set:** Held out entirely until step 04 — never used for model selection or threshold tuning.
+- **Jenks breaks:** Computed on training set predictions only, then applied consistently to all subsets and future runs.
+- **Random seed:** `42` throughout (except `00_split_data.py` which uses `107`).
 
-- **`02_overunder_sampling.py`** — Test resampling strategies (random under/oversampling, SMOTE, SMOTEENN, SMOTETomek) focused on RF and XGBoost.
-- **`03_hyperparameter_tuning.py`** — RandomizedSearchCV or Optuna search after best resampling strategy is identified.
+---
+
+## Decision Threshold
+
+No fixed per-model threshold is used. The decision threshold is treated as a post-hoc operating point: each model is reported at the threshold that **maximizes its MCC** (the peak of its MCC-vs-threshold curve), selected on the evaluation predictions and stored inside the metrics JSON. In step 04 the threshold is committed once on the **test** set and applied unchanged to all subsets (train / test / validation).
+
+This avoids comparing models at a single shared cut, which would conflate model quality with how well that cut aligns with each model's probability scale. The deployed risk maps use Jenks natural breaks (step 05), not a binary threshold.
+
+---
+
+## Risk Classification
+
+Five risk classes based on Jenks natural breaks applied to training set predicted probabilities:
+
+| Class | Label |
+|---|---|
+| 1 | Very low |
+| 2 | Low |
+| 3 | Medium |
+| 4 | High |
+| 5 | Very high |
+
+Colors: `#ffffb2` → `#fecc5c` → `#fd8d3c` → `#f03b20` → `#bd0026`
 
 ---
 
@@ -134,19 +189,49 @@ pandas
 numpy
 scikit-learn
 xgboost
+imbalanced-learn
 matplotlib
 seaborn
-imbalanced-learn   # required for Step 2 (SMOTE etc.)
+geopandas
+geodatasets
+jenkspy
+joblib
 ```
 
-Install with:
-
+Install all dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
 ---
 
-## Reproducibility
+## Reproducing the Pipeline
 
-All scripts use a **fixed random seed** defined at the top of each file. The train/test/validation split is determined solely by `split_index.csv`, ensuring consistent data partitioning across all pipeline steps.
+```bash
+# Step 00 — Split data
+python 00_split_data.py
+
+# Step 01 — Baseline model testing (one job per model)
+bash sbatch_01_model_testing.sh
+
+# Step 02 — Over/undersampling (one job per model+sampler combination)
+bash sbatch_02_overundersampling.sh
+
+# Step 03 — Hyperparameter tuning (one job per model)
+bash sbatch_03_hyperparameter_tuning.sh
+
+# Step 04 — Final model training (one job per model)
+bash sbatch_04_final_model_training.sh
+
+# Step 05 — Compute Jenks breaks
+bash sbatch_05_compute_jenks.sh
+
+# Step 06 — Plot risk maps
+python 06_plot_risk_maps.py
+
+# Plotting scripts (run after each step completes)
+python 01_plot_model_testing.py
+python 02_plot_overundersampling.py
+python 03_plot_hyperparameter_tuning.py
+python 04_plot_topk_finalmodel.py
+```

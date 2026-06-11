@@ -25,7 +25,7 @@ import cartopy.feature as cfeature
 # ---------------------------------------------------------------------------
 
 INPUT_FILE = "/home/diegopab/projects/ForestFire_GT/paperwriting/data/data_trainingset_2017-2024/allvars_2017-2024_v2.csv"
-OUTPUT_DIR = "./figures/maps/"  
+OUTPUT_DIR = "../../figures/01_data_exploration/maps"
 
 # ---------------------------------------------------------------------------
 # Variable configuration

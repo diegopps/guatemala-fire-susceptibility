@@ -27,8 +27,8 @@ from sklearn.decomposition import PCA
 # Settings
 # ---------------------------------------------------------------------------
 
-INPUT_FILE = "/home/diegopab/projects/ForestFire_GT/paperwriting/data/data_trainingset_2017-2024/allvars_2017-2024_v2.csv"
-OUTPUT_DIR = "./figures/pca"
+INPUT_FILE = "/home/diegopab/projects/ForestFire_GT/paperwriting/ForestFire_GT/data/indata/data_trainingset_2017-2024/allvars_2017-2024.csv"
+OUTPUT_DIR = "../../figures/01_data_exploration/pca"
 
 # ---------------------------------------------------------------------------
 # Variables (fire excluded — predictors only)

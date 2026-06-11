@@ -89,13 +89,10 @@ def run_dir(model_short, sampler_short):
 
 
 def load_metrics(model_short, sampler_short):
-    """Load metrics JSON, auto-detecting the threshold suffix from the filename."""
-    directory = run_dir(model_short, sampler_short)
-    matches = [f for f in os.listdir(directory) if f.startswith("metrics_") and f.endswith(".json")] \
-              if os.path.isdir(directory) else []
-    if not matches:
+    """Load metrics.json (threshold is stored inside, under 'threshold')."""
+    path = os.path.join(run_dir(model_short, sampler_short), "metrics.json")
+    if not os.path.exists(path):
         return None
-    path = os.path.join(directory, matches[0])
     with open(path, "r") as f:
         return json.load(f)
 
@@ -147,15 +144,12 @@ def main():
     for model_key, model_short in MODELS.items():
         for sampler_key, sampler_short in SAMPLERS.items():
             directory = run_dir(model_short, sampler_short)
-            cm_matches = [f for f in os.listdir(directory) if f.startswith("confusion_matrix_") and f.endswith(".csv")] \
-                         if os.path.isdir(directory) else []
+            cm_path   = os.path.join(directory, "confusion_matrix.csv")
 
-            if not cm_matches:
-                print(f"  WARNING: confusion_matrix_*.csv not found for "
+            if not os.path.exists(cm_path):
+                print(f"  WARNING: confusion_matrix.csv not found for "
                       f"'{run_name(model_short, sampler_short)}' — skipping.")
                 continue
-
-            cm_path = os.path.join(directory, cm_matches[0])
 
             cm_df = pd.read_csv(cm_path)
             cm = np.column_stack([
@@ -164,11 +158,18 @@ def main():
             ])
 
             label = run_name(model_short, sampler_short)
+            # Show the reported (MCC-optimal) threshold in the title; keep the
+            # filename clean so re-runs overwrite cleanly.
+            metrics   = load_metrics(model_short, sampler_short)
+            thresh    = metrics.get("threshold") if metrics else None
+            title_name = f"{label} (thr={thresh:.4g})" if thresh is not None else label
+
             print(f"  Plotting confusion matrix for: {label}")
             plot_confusion_matrix(
                 cm=cm,
-                model_name=label,
+                model_name=title_name,
                 output_dir=OUTPUT_DIR,
+                filename_prefix=f"confusion_matrix_{label}",
             )
 
     # -------------------------------------------------------------------------
