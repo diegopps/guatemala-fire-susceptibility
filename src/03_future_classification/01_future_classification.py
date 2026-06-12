@@ -1,5 +1,5 @@
 """
-07_future_classification.py
+01_future_classification.py
 ----------------------------
 Applies a single pre-trained final model to all preprocessed future climate
 and historical CSVs, generating monthly fire probability predictions for
@@ -9,8 +9,9 @@ For each scenario × year combination, the script loads the preprocessed CSV,
 runs predict_proba() using the saved .joblib model, and writes a lightweight
 output CSV containing only lat, lon, year, month, and y_prob.
 
-Jenks risk classification is NOT applied here — it is applied downstream
-in the plotting script, keeping this step fast and output files compact.
+Risk classification is NOT applied here — the frozen risk thresholds (step 05)
+are applied downstream in the plotting script, keeping this step fast and the
+output files compact.
 
 Usage:
     python 01_future_classification.py <model_name>
@@ -34,9 +35,9 @@ Output structure:
 # =============================================================================
 
 PROJECT_DIR        = "/home/diegopab/projects/ForestFire_GT/paperwriting/ForestFireGT"
-PROCESSED_DATA_DIR = f"{PROJECT_DIR}/data/future_climate_processed"
+PROCESSED_DATA_DIR = f"{PROJECT_DIR}/data/indata/data_fullfuture_processed"
 MODELS_DIR         = f"{PROJECT_DIR}/models"
-OUTPUT_DIR         = f"{PROJECT_DIR}/data/indata/01_future_classification"
+OUTPUT_DIR         = f"{PROJECT_DIR}/data/classified_future"
 
 # Scenarios and their year ranges — subdirectory name must match key
 SCENARIOS = {
@@ -270,7 +271,7 @@ def main(model_key):
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print("Usage: python 07_future_classification.py <model_name>")
+        print("Usage: python 01_future_classification.py <model_name>")
         print(f"Available models: {', '.join(MODELS.keys())}")
         sys.exit(1)
 

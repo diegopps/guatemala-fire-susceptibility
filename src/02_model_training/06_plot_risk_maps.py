@@ -2,26 +2,43 @@
 06_plot_risk_maps.py
 ---------------------
 Applies pre-computed Jenks natural breaks to predicted probabilities and
-produces fire risk classification maps for each final trained model.
+produces fire risk classification maps for the final trained models.
 
-For each model this script:
-  1. Loads jenks_breaks.json from step 05.
-  2. Loads predictions_train.csv, predictions_test.csv, predictions_val.csv.
-  3. Applies Jenks breaks to y_prob → integer risk class (1–5).
-  4. Calls plot_seasonal_maps() → 2 figures per model per subset
-     (dry season + wet season) for the results section.
-  5. Calls plot_monthly_climatology() → 12 figures per model per subset
-     for the appendix.
+Two figure types are produced:
+
+  1. Fire-season comparison (main text):
+       A single figure with one panel per model (RF, XGB, XT), each showing the
+       dry-season (Nov–Apr, the official fire season) risk climatology. Panels
+       are lettered A), B), C) for cross-referencing.
+         -> results/06_risk_maps/fire_season_comparison.{png,pdf,svg}
+
+  2. Monthly climatology (appendix):
+       One 3x4 panel figure per model, showing the 12 calendar-month
+       climatologies.
+         -> results/06_risk_maps/<MODEL_SHORT>/<MODEL_SHORT>_monthly_climatology.{...}
+
+Data
+----
+Maps are built from ALL prediction subsets combined (train + test + val), giving
+complete spatial coverage and every cell's full month history. This is a
+visualization of the model's risk surface — quantitative performance is reported
+separately on the held-out test/validation sets (steps 02–04). The risk classes
+come from the frozen prediction-rate thresholds fit on HELD-OUT data (step 05),
+so the classification scheme is not biased by in-sample training probabilities.
+
+Aggregation
+-----------
+For each cell, the predicted probability is averaged over the relevant months
+(and all years), then the frozen risk thresholds (step 05) are applied to that
+mean probability to assign a risk class. Probabilities are averaged (not class
+labels), since the classes are unequal-width bins. The same fixed thresholds are
+used for every map, so seasons/months (and, later, future scenarios) are
+directly comparable.
 
 Usage:
     python 06_plot_risk_maps.py
 
-No CLI arguments required — runs all three models and all subsets.
-
-Output directory:
-    results/06_risk_maps/<MODEL_SHORT>/
-      seasonal/    — dry + wet season maps (results section)
-      climatology/ — 12 monthly climatology maps (appendix)
+No CLI arguments required — runs all three models.
 """
 
 # =============================================================================
@@ -39,7 +56,14 @@ MODELS = {
     "extra_trees":   "XT",
 }
 
-# Subsets to map — must match subset labels used in step 04
+# Display names used in panel titles
+MODEL_DISPLAY = {
+    "random_forest": "Random Forest",
+    "xgboost":       "XGBoost",
+    "extra_trees":   "Extra Trees",
+}
+
+# Subsets combined to form the full prediction set per model
 SUBSETS = ["train", "test", "val"]
 
 # =============================================================================
@@ -51,8 +75,8 @@ import sys
 import pandas as pd
 
 sys.path.append(os.path.join(PROJECT_DIR, "src", "utils"))
-from jenks_breaks import load_breaks, apply_jenks_breaks
-from plot_risk_map import plot_seasonal_maps, plot_monthly_climatology
+from risk_thresholds import load_thresholds, apply_thresholds
+from plot_risk_map import plot_risk_map_grid, DRY_MONTHS, MONTH_NAMES
 
 # =============================================================================
 # HELPERS
@@ -65,90 +89,113 @@ def section(title):
     print("=" * 60)
 
 
+def load_all_predictions(model_short):
+    """
+    Load and concatenate train/test/val predictions for one model into the full
+    prediction set. Returns a DataFrame with columns lat, lon, month, y_prob
+    (rows with NaN probabilities dropped), or None if nothing could be loaded.
+    """
+    model_results_dir = os.path.join(RESULTS_DIR, model_short)
+    frames = []
+    for subset in SUBSETS:
+        path = os.path.join(model_results_dir, f"predictions_{subset}.csv")
+        if not os.path.exists(path):
+            print(f"  WARNING: predictions_{subset}.csv not found for "
+                  f"'{model_short}' — skipping that subset.")
+            continue
+        df = pd.read_csv(path, usecols=["lat", "lon", "month", "y_prob"])
+        frames.append(df)
+        print(f"  Loaded {len(df):,} rows from {subset}.")
+
+    if not frames:
+        return None
+
+    full = pd.concat(frames, ignore_index=True)
+    full = full.dropna(subset=["y_prob"])
+    print(f"  Combined total: {len(full):,} rows.")
+    return full
+
+
+def aggregate_risk(df, months, breaks):
+    """
+    Aggregate to one risk class per cell over the given months:
+    mean y_prob per (lat, lon), then apply the frozen risk thresholds.
+
+    Returns a DataFrame with columns lat, lon, risk_class.
+    """
+    subset = df[df["month"].isin(months)]
+    agg = (subset.groupby(["lat", "lon"], as_index=False)["y_prob"].mean())
+    agg["risk_class"] = apply_thresholds(agg["y_prob"].values, breaks)
+    return agg[["lat", "lon", "risk_class"]]
+
+
 # =============================================================================
 # MAIN
 # =============================================================================
 
 def main():
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    fire_season_panels = []   # one dry-season panel per model -> combined figure
 
     for model_key, model_short in MODELS.items():
         section(f"Processing risk maps — {model_short}")
 
         model_results_dir = os.path.join(RESULTS_DIR, model_short)
-        breaks_path       = os.path.join(model_results_dir, "jenks_breaks.json")
+        breaks_path       = os.path.join(model_results_dir, "risk_thresholds.json")
 
-        # --- Load Jenks breaks ---
+        # --- Load frozen risk thresholds (computed in step 05) ---
         if not os.path.exists(breaks_path):
-            print(f"  ERROR: jenks_breaks.json not found for '{model_short}' "
-                  f"at {breaks_path}.")
-            print(f"  Run 05_compute_jenks.py first — skipping.")
+            print(f"  ERROR: risk_thresholds.json not found for '{model_short}'. "
+                  f"Run 05_compute_risk_thresholds.py first — skipping.")
+            continue
+        breaks = load_thresholds(breaks_path)["breaks"]
+
+        # --- Load combined predictions ---
+        df = load_all_predictions(model_short)
+        if df is None or df.empty:
+            print(f"  ERROR: no predictions available for '{model_short}' — skipping.")
             continue
 
-        breaks = load_breaks(breaks_path)
+        # --- Fire-season (dry) panel for the combined comparison figure ---
+        dry_agg = aggregate_risk(df, DRY_MONTHS, breaks)
+        fire_season_panels.append({
+            "df":    dry_agg,
+            "title": MODEL_DISPLAY[model_key],
+        })
 
-        # --- Process each subset ---
-        for subset in SUBSETS:
-            preds_path = os.path.join(model_results_dir, f"predictions_{subset}.csv")
+        # --- Appendix: 12-month climatology grid for this model ---
+        print(f"\n  Building monthly climatology grid for {model_short}...")
+        monthly_panels = []
+        for month_num, month_name in MONTH_NAMES.items():
+            agg = aggregate_risk(df, [month_num], breaks)
+            monthly_panels.append({"df": agg, "title": month_name})
 
-            if not os.path.exists(preds_path):
-                print(f"\n  WARNING: predictions_{subset}.csv not found for "
-                      f"'{model_short}' — skipping.")
-                continue
+        monthly_path = os.path.join(OUTPUT_DIR, model_short,
+                                    f"{model_short}_monthly_climatology")
+        plot_risk_map_grid(
+            panels=monthly_panels,
+            output_path=monthly_path,
+            nrows=3, ncols=4,
+            suptitle=f"{MODEL_DISPLAY[model_key]} — Monthly Fire Risk Climatology",
+            panel_letters=False,
+        )
 
-            print(f"\n  Loading predictions: {subset} set...")
-            preds_df = pd.read_csv(preds_path)
+        del df  # free the large combined frame before the next model
 
-            # Validate required columns
-            required_cols = ["lat", "lon", "month", "year", "y_prob"]
-            missing = [c for c in required_cols if c not in preds_df.columns]
-            if missing:
-                print(f"  ERROR: Missing columns {missing} in predictions_{subset}.csv "
-                      f"for '{model_short}' — skipping.")
-                continue
-
-            if preds_df["y_prob"].isna().all():
-                print(f"  ERROR: y_prob is all NaN for '{model_short}' "
-                      f"({subset}) — skipping.")
-                continue
-
-            print(f"  Loaded {len(preds_df):,} rows.")
-
-            # --- Apply Jenks breaks ---
-            print(f"  Applying Jenks breaks...")
-            preds_df["risk_class"] = apply_jenks_breaks(
-                preds_df["y_prob"].values, breaks
-            )
-
-            # Summary of risk class distribution
-            counts = preds_df["risk_class"].value_counts().sort_index()
-            print(f"  Risk class distribution ({subset}):")
-            risk_labels = {1: "very low", 2: "low", 3: "medium",
-                           4: "high", 5: "very high"}
-            for cls, count in counts.items():
-                pct = count / len(preds_df) * 100
-                print(f"    Class {cls} ({risk_labels.get(cls, '?'):>9}): "
-                      f"{count:>10,} cells ({pct:.2f}%)")
-
-            # --- Output directories ---
-            model_label   = f"{model_short}_{subset}"
-            seasonal_dir  = os.path.join(OUTPUT_DIR, model_short, subset, "seasonal")
-            climatology_dir = os.path.join(OUTPUT_DIR, model_short, subset, "climatology")
-
-            # --- Seasonal maps (results section) ---
-            print(f"\n  Plotting seasonal maps ({subset})...")
-            plot_seasonal_maps(
-                df=preds_df,
-                model_label=model_label,
-                output_dir=seasonal_dir,
-            )
-
-            # --- Monthly climatology maps (appendix) ---
-            print(f"\n  Plotting monthly climatology maps ({subset})...")
-            plot_monthly_climatology(
-                df=preds_df,
-                model_label=model_label,
-                output_dir=climatology_dir,
-            )
+    # --- Main-text figure: fire-season comparison across models ---
+    if fire_season_panels:
+        section("Building fire-season comparison figure (all models)")
+        comparison_path = os.path.join(OUTPUT_DIR, "fire_season_comparison")
+        plot_risk_map_grid(
+            panels=fire_season_panels,
+            output_path=comparison_path,
+            nrows=1, ncols=len(fire_season_panels),
+            suptitle="Fire-Season (Dry, Nov–Apr) Fire Risk by Model",
+            panel_letters=True,
+        )
+    else:
+        print("\nNo models produced fire-season panels — comparison figure skipped.")
 
     print("\nAll risk maps complete.")
 

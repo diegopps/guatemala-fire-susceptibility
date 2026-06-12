@@ -1,130 +1,80 @@
 """
-01_plot_future_risk.py
------------------------
-Generates fire risk classification maps for all future climate scenarios
-using predictions from step 07 and Jenks breaks from step 05.
+01_plot_future_classification.py
+--------------------------------
+Summarizes the future fire-risk projections (step 01_future_classification) into
+publication figures, applying the FROZEN risk thresholds (step 05) so present and
+future maps are directly comparable.
 
-For each model this script produces two sets of figures:
+Two figures are produced:
 
-  1. DECADAL SEASONAL MAPS (results / appendix)
-     For each decade (2020s–2090s) and each season (dry/wet):
-       - One figure per season per decade
-       - All 3 SSP scenarios shown as columns within each figure
-       - Rows = models (RF, XGB, XT)
-     Dry season : Nov–Apr | Wet season : May–Oct
+  Figure 1 — Temporal trend (results)
+    fig1_trend.{png,pdf,svg}
+    Three rows (one per model, labelled A/B/C). x = year (1961–2100),
+    y = % of national area in the High+Very-High fire-risk classes (fire season).
+    Three SSP scenario lines per row + the shared historical baseline, all as
+    10-year rolling means.
 
-  2. MONTHLY CLIMATOLOGY MAPS (appendix)
-     For each decade and each calendar month (1–12):
-       - One figure per month per decade
-       - All 3 SSP scenarios shown as columns
-       - Rows = models (RF, XGB, XT)
-     Each cell value = mean risk class across all years within the decade.
+  Figure 2 — Spatial change (results / appendix), generated for ALL THREE models
+    in two versions each:
+      fig2_<MODEL>_normal.{png,pdf,svg}  — absolute fire-season risk classes
+      fig2_<MODEL>_change.{png,pdf,svg}  — Δ risk class vs the baseline
+    Layout: one centered baseline map (1991–2014) on the left, then a 3×2 grid
+    (rows = SSP scenarios, with vertical labels; columns = Mid-century 2041–2060,
+    End-century 2081–2100). In the change version the baseline keeps the absolute
+    5-class colors (the reference) while the Mid/End cells show Δ risk class.
 
-Jenks breaks are loaded from each model's jenks_breaks.json (computed in
-step 05 on training set predictions) and applied consistently here.
-
-Historical data (1961–2014) is NOT plotted — future scenarios only.
+Aggregation: per cell, the predicted probability is averaged over the fire-season
+months across the period's years, then the frozen thresholds are applied.
 
 Usage:
-    python 01_plot_future_risk.py
-
-No CLI arguments — runs all three models and produces all figures.
-
-Output structure:
-    results/01_future_risk_maps/
-        seasonal/
-            dry/
-                decade_2020s_dry.{png,pdf,svg}
-                decade_2030s_dry.{png,pdf,svg}
-                ...
-            wet/
-                decade_2020s_wet.{png,pdf,svg}
-                ...
-        climatology/
-            decade_2020s/
-                month_01_january.{png,pdf,svg}
-                ...
-            decade_2030s/
-                ...
+    python 01_plot_future_classification.py
 """
 
 # =============================================================================
 # SETTINGS
 # =============================================================================
 
-PROJECT_DIR      = "/home/diegopab/projects/ForestFire_GT/paperwriting/ForestFireGT"
-PREDICTIONS_DIR  = f"{PROJECT_DIR}/results/01_future_classification"
-JENKS_DIR        = f"{PROJECT_DIR}/results/04_final_model_training"
-OUTPUT_DIR       = f"{PROJECT_DIR}/results/01_future_risk_maps"
+PROJECT_DIR     = "/home/diegopab/projects/ForestFire_GT/paperwriting/ForestFireGT"
+# Predictions written by 01_future_classification.py:
+PREDICTIONS_DIR = f"{PROJECT_DIR}/data/classified_future"
+THRESHOLDS_DIR  = f"{PROJECT_DIR}/results/04_final_model_training"
+OUTPUT_DIR      = f"{PROJECT_DIR}/results/03_future_classification"
 
-# Models — order determines row order in multi-model figures
+# Models — order determines row order in Figure 1
 MODELS = {
     "random_forest": "RF",
     "xgboost":       "XGB",
     "extra_trees":   "XT",
 }
-
-# SSP scenarios to plot — historical excluded from figures
-SSP_SCENARIOS = ["ssp126", "ssp370", "ssp585"]
-
-# Human-readable scenario labels for figure titles and axis labels
-SCENARIO_LABELS = {
-    "ssp126": "SSP1-2.6\nSustainability",
-    "ssp370": "SSP3-7.0\nRegional Rivalry",
-    "ssp585": "SSP5-8.5\nFossil-Fuelled Dev.",
+MODEL_DISPLAY = {
+    "random_forest": "Random Forest",
+    "xgboost":       "XGBoost",
+    "extra_trees":   "Extra Trees",
 }
 
-# Decades to plot — each decade is defined as a 10-year range
-DECADES = {
-    "2020s": range(2020, 2030),
-    "2030s": range(2030, 2040),
-    "2040s": range(2040, 2050),
-    "2050s": range(2050, 2060),
-    "2060s": range(2060, 2070),
-    "2070s": range(2070, 2080),
-    "2080s": range(2080, 2090),
-    "2090s": range(2090, 2100),
+# SSP scenarios — order = row order (top→bottom) in Figure 2
+SSP_SCENARIOS  = ["ssp126", "ssp370", "ssp585"]
+SCENARIO_SHORT = {"ssp126": "SSP1-2.6", "ssp370": "SSP3-7.0", "ssp585": "SSP5-8.5"}
+SCENARIO_COLORS = {"ssp126": "#1d6996", "ssp370": "#e8a33d", "ssp585": "#cc3311"}
+HIST_COLOR = "#444444"
+
+# Year ranges
+HIST_YEARS   = range(1961, 2015)   # historical scenario (1961–2014)
+FUTURE_YEARS = range(2015, 2101)   # ssp scenarios (2015–2100)
+
+# Periods for Figure 2 (per-cell fire-season mean over these years)
+BASELINE_YEARS = range(1991, 2015)             # 1991–2014 (historical)
+FUTURE_PERIODS = {                              # from each ssp scenario
+    "mid": (range(2041, 2061), "Mid-century\n(2041–2060)"),
+    "end": (range(2081, 2101), "End-century\n(2081–2100)"),
 }
+BASELINE_LABEL = "Baseline\n(1991–2014)"
 
-# Season definitions
-SEASONS = {
-    "dry": {
-        "months":    [11, 12, 1, 2, 3, 4],
-        "label":     "Dry Season (Nov–Apr)",
-        "filename":  "dry",
-    },
-    "wet": {
-        "months":    [5, 6, 7, 8, 9, 10],
-        "label":     "Wet Season (May–Oct)",
-        "filename":  "wet",
-    },
-}
+# Trend metric: classes counted as "high risk"
+HIGH_RISK_CLASSES = (4, 5)        # High + Very High
+ROLLING_WINDOW    = 10            # years
 
-# Month names for climatology figures
-MONTH_NAMES = {
-    1: "January",   2: "February",  3: "March",
-    4: "April",     5: "May",       6: "June",
-    7: "July",      8: "August",    9: "September",
-    10: "October",  11: "November", 12: "December",
-}
-
-# Risk class colours — consistent with steps 05/06
-RISK_COLORS = {
-    1: "#ffffb2",   # Very low
-    2: "#fecc5c",   # Low
-    3: "#fd8d3c",   # Medium
-    4: "#f03b20",   # High
-    5: "#bd0026",   # Very high
-}
-RISK_LABELS = {
-    1: "Very low", 2: "Low", 3: "Medium", 4: "High", 5: "Very high"}
-
-N_RISK_CLASSES = 5
-
-# File naming pattern for prediction CSVs
 PRED_FILENAME_PATTERN = "{scenario}_{year}_predictions.csv"
-
-# Output formats
 SAVE_FORMATS = ["png", "pdf", "svg"]
 DPI = 300
 
@@ -134,347 +84,224 @@ DPI = 300
 
 import os
 import sys
-import json
 import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-import matplotlib.colors as mcolors
-import seaborn as sns
+import matplotlib.cm as cm
 
 sys.path.append(os.path.join(PROJECT_DIR, "src", "utils"))
-from jenks_breaks import load_breaks, apply_jenks_breaks
-from plot_risk_map import _build_raster
+from risk_thresholds import load_thresholds, apply_thresholds
+from plot_risk_map import (
+    _render_risk_map, _load_boundaries, _make_colormap, make_delta_cmap,
+    RISK_COLORS, RISK_LABELS, DRY_MONTHS,
+)
 
 # =============================================================================
-# HELPERS
+# DATA
 # =============================================================================
 
 def section(title):
-    print()
-    print("=" * 60)
-    print(title)
-    print("=" * 60)
+    print("\n" + "=" * 60 + f"\n{title}\n" + "=" * 60)
 
 
-def subsection(title):
-    print(f"\n  --- {title} ---")
-
-
-def load_jenks_breaks(model_short):
-    """Load pre-computed Jenks breaks for a model from step 05 output."""
-    path = os.path.join(JENKS_DIR, model_short, "jenks_breaks.json")
+def load_year(model_short, scenario, year):
+    """Load one prediction CSV (lat, lon, month, y_prob) or None if missing."""
+    path = os.path.join(PREDICTIONS_DIR, model_short, scenario,
+                        PRED_FILENAME_PATTERN.format(scenario=scenario, year=year))
     if not os.path.exists(path):
-        print(f"  ERROR: jenks_breaks.json not found for {model_short} at {path}")
         return None
-    return load_breaks(path)
+    return pd.read_csv(path, usecols=["lat", "lon", "month", "y_prob"])
 
 
-def load_decade_predictions(model_short, scenario, decade_years):
+def process_model_scenario(model_short, scenario, breaks, years, period_windows):
     """
-    Load and concatenate all yearly prediction CSVs for a given
-    model / scenario / decade combination.
-    Returns a DataFrame with lat, lon, year, month, y_prob columns,
-    or None if no files were found.
+    Single pass over a scenario's years. Returns:
+      trend  : {year: % area high-risk}  (fire season, that year)
+      cells  : {period_name: DataFrame(lat, lon, y_prob)}  per-cell fire-season
+               mean probability averaged over each period's years.
     """
-    frames = []
-    pred_dir = os.path.join(PREDICTIONS_DIR, model_short, scenario)
+    trend  = {}
+    plists = {name: [] for name in period_windows}
 
-    for year in decade_years:
-        filename = PRED_FILENAME_PATTERN.format(scenario=scenario, year=year)
-        filepath = os.path.join(pred_dir, filename)
-
-        if not os.path.exists(filepath):
-            print(f"    WARNING: Missing {filename} — skipping year {year}.")
+    for year in years:
+        df = load_year(model_short, scenario, year)
+        if df is None:
             continue
+        dry = df[df["month"].isin(DRY_MONTHS)]
+        if dry.empty:
+            continue
+        cell = dry.groupby(["lat", "lon"], as_index=False)["y_prob"].mean()
 
-        df = pd.read_csv(filepath, usecols=["lat", "lon", "year", "month", "y_prob"])
-        frames.append(df)
+        cls = apply_thresholds(cell["y_prob"].to_numpy(), breaks)
+        trend[year] = 100.0 * float(np.isin(cls, HIGH_RISK_CLASSES).mean())
 
-    if not frames:
-        return None
+        for name, yr_range in period_windows.items():
+            if year in yr_range:
+                plists[name].append(cell)
 
-    return pd.concat(frames, ignore_index=True)
-
-
-def apply_breaks_to_df(df, breaks):
-    """Apply Jenks breaks to y_prob column, adding a risk_class column."""
-    df = df.copy()
-    df["risk_class"] = apply_jenks_breaks(df["y_prob"].values, breaks)
-    return df
-
-
-def build_risk_colormap():
-    """Build a discrete ListedColormap and BoundaryNorm for risk classes 1–5."""
-    colors = [RISK_COLORS[i] for i in range(1, N_RISK_CLASSES + 1)]
-    cmap   = mcolors.ListedColormap(colors)
-    norm   = mcolors.BoundaryNorm(boundaries=[0.5, 1.5, 2.5, 3.5, 4.5, 5.5],
-                                   ncolors=N_RISK_CLASSES)
-    return cmap, norm
+    cells = {}
+    for name, lst in plists.items():
+        if lst:
+            cells[name] = (pd.concat(lst, ignore_index=True)
+                           .groupby(["lat", "lon"], as_index=False)["y_prob"].mean())
+    return trend, cells
 
 
-def build_legend_patches():
-    """Build legend patch handles for risk classes 1–5."""
-    return [
-        mpatches.Patch(facecolor=RISK_COLORS[i], label=RISK_LABELS[i])
-        for i in range(1, N_RISK_CLASSES + 1)
-    ]
+def classify(cell_df, breaks):
+    """Per-cell mean prob -> risk_class (1..5)."""
+    out = cell_df[["lat", "lon"]].copy()
+    out["risk_class"] = apply_thresholds(cell_df["y_prob"].to_numpy(), breaks)
+    return out
 
 
-def save_figure(fig, out_dir, filename_stem):
-    """Save a figure in all configured formats."""
-    os.makedirs(out_dir, exist_ok=True)
+def rolling(series_dict):
+    """Sorted pandas Series with a centered rolling mean over ROLLING_WINDOW years."""
+    s = pd.Series(series_dict).sort_index()
+    return s.rolling(ROLLING_WINDOW, center=True, min_periods=1).mean()
+
+
+def save_figure(fig, stem):
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
     for fmt in SAVE_FORMATS:
-        out_path = os.path.join(out_dir, f"{filename_stem}.{fmt}")
-        fig.savefig(out_path, dpi=DPI, bbox_inches="tight")
-    print(f"    Saved: {filename_stem}.{{png,pdf,svg}} → {out_dir}/")
-
-
-def plot_risk_raster_ax(ax, df_subset, breaks, title):
-    """
-    Render a mean risk class raster on a given Axes object.
-    df_subset must have lat, lon, risk_class columns.
-    Mean risk class per cell is computed before rasterising.
-    """
-    # Average risk class across all months/years in subset
-    mean_risk = (
-        df_subset
-        .groupby(["lat", "lon"])["risk_class"]
-        .mean()
-        .reset_index()
-        .rename(columns={"risk_class": "risk_mean"})
-    )
-    # Round to nearest integer class for display
-    mean_risk["risk_class"] = mean_risk["risk_mean"].round().astype(int).clip(1, 5)
-
-    cmap, norm = build_risk_colormap()
-
-    try:
-        lats, lons, grid = _build_raster(
-            mean_risk, lat_col="lat", lon_col="lon", value_col="risk_class"
-        )
-        ax.pcolormesh(lons, lats, grid, cmap=cmap, norm=norm,
-                      shading="nearest", rasterized=True)
-    except Exception as e:
-        ax.text(0.5, 0.5, f"Raster error:\n{e}",
-                ha="center", va="center", transform=ax.transAxes, fontsize=7)
-
-    ax.set_title(title, fontsize=8, pad=4)
-    ax.set_aspect("equal")
-    ax.axis("off")
+        fig.savefig(os.path.join(OUTPUT_DIR, f"{stem}.{fmt}"),
+                    dpi=DPI, bbox_inches="tight")
+    print(f"  Saved: {stem}.{{{','.join(SAVE_FORMATS)}}}")
+    plt.close(fig)
 
 
 # =============================================================================
-# PLOT FUNCTIONS
+# FIGURE 1 — TEMPORAL TREND
 # =============================================================================
 
-def plot_decadal_seasonal_maps(all_breaks):
+def render_trend_figure(all_trends):
+    section("Figure 1 — temporal trend")
+    fig, axes = plt.subplots(len(MODELS), 1, figsize=(10, 11), sharex=True)
+    letters = "ABCDEFG"
+
+    for i, (model_key, short) in enumerate(MODELS.items()):
+        ax = axes[i]
+        tr = all_trends[short]
+
+        if tr.get("historical"):
+            h = rolling(tr["historical"])
+            ax.plot(h.index, h.values, color=HIST_COLOR, lw=1.8, label="Historical")
+        for ssp in SSP_SCENARIOS:
+            if tr.get(ssp):
+                s = rolling(tr[ssp])
+                ax.plot(s.index, s.values, color=SCENARIO_COLORS[ssp], lw=1.8,
+                        label=SCENARIO_SHORT[ssp])
+
+        ax.axvline(2015, color="grey", ls=":", lw=0.8, alpha=0.6)
+        ax.set_title(f"{letters[i]})  {MODEL_DISPLAY[model_key]}",
+                     loc="left", fontsize=12, fontweight="bold")
+        ax.set_ylabel("% area High+Very-High")
+        ax.set_xlim(1961, 2100)
+        ax.grid(True, alpha=0.3)
+
+    axes[-1].set_xlabel("Year")
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=4, frameon=False,
+               bbox_to_anchor=(0.5, -0.01), fontsize=11)
+    fig.suptitle(
+        f"Fire-season area at High/Very-High risk, 1961–2100 "
+        f"({ROLLING_WINDOW}-yr rolling mean)",
+        fontsize=14, fontweight="bold", y=0.995)
+    fig.tight_layout(rect=[0, 0.03, 1, 0.98])
+    save_figure(fig, "fig1_trend")
+
+
+# =============================================================================
+# FIGURE 2 — SPATIAL CHANGE (per model, normal + change)
+# =============================================================================
+
+def render_spatial_figure(model_key, model_short, period_cells, breaks, mode):
     """
-    Produce decadal seasonal maps.
-    Layout: rows = models, columns = SSP scenarios.
-    One figure per decade × season combination.
+    mode: "normal" (absolute classes) or "change" (Δ class vs baseline).
+    period_cells keys: "baseline", (ssp, "mid"), (ssp, "end").
     """
-    section("Plotting decadal seasonal maps...")
+    country, departments = _load_boundaries()
+    risk_cmap,  risk_norm  = _make_colormap()
+    delta_cmap, delta_norm = make_delta_cmap(4)
 
-    cmap, norm   = build_risk_colormap()
-    legend_patches = build_legend_patches()
+    if "baseline" not in period_cells:
+        print(f"  WARNING: no baseline data for {model_short} — skipping {mode} figure.")
+        return
+    base_cls = classify(period_cells["baseline"], breaks)
 
-    n_rows = len(MODELS)
-    n_cols = len(SSP_SCENARIOS)
+    fig = plt.figure(figsize=(13, 13))
+    gs  = fig.add_gridspec(3, 3, wspace=0.08, hspace=0.10)
 
-    for decade_label, decade_years in DECADES.items():
-        for season_key, season_info in SEASONS.items():
+    # --- Baseline map: single, centered on the left (middle row) ---
+    ax_base = fig.add_subplot(gs[1, 0])
+    _render_risk_map(ax_base, base_cls, title="", risk_col="risk_class",
+                     country=country, departments=departments,
+                     cmap=risk_cmap, norm=risk_norm,
+                     show_xlabel=False, show_ylabel=False)
+    ax_base.set_title(BASELINE_LABEL, fontsize=11, fontweight="bold", pad=6)
 
-            fig_filename = f"decade_{decade_label}_{season_info['filename']}"
-            out_dir      = os.path.join(OUTPUT_DIR, "seasonal", season_info["filename"])
+    # --- 3×2 grid: rows = SSP, cols = mid / end ---
+    period_keys = list(FUTURE_PERIODS.keys())   # ["mid", "end"]
+    for r, ssp in enumerate(SSP_SCENARIOS):
+        for c, pkey in enumerate(period_keys):
+            ax = fig.add_subplot(gs[r, c + 1])
+            key = (ssp, pkey)
+            if key not in period_cells:
+                ax.text(0.5, 0.5, "no data", ha="center", va="center",
+                        transform=ax.transAxes, fontsize=8)
+                ax.axis("off")
+            else:
+                fut_cls = classify(period_cells[key], breaks)
+                if mode == "normal":
+                    _render_risk_map(ax, fut_cls, title="", risk_col="risk_class",
+                                     country=country, departments=departments,
+                                     cmap=risk_cmap, norm=risk_norm,
+                                     show_xlabel=False, show_ylabel=False)
+                else:  # change
+                    m = fut_cls.merge(base_cls, on=["lat", "lon"],
+                                      suffixes=("_fut", "_base"))
+                    m["delta"] = m["risk_class_fut"] - m["risk_class_base"]
+                    _render_risk_map(ax, m[["lat", "lon", "delta"]], title="",
+                                     risk_col="delta",
+                                     country=country, departments=departments,
+                                     cmap=delta_cmap, norm=delta_norm,
+                                     show_xlabel=False, show_ylabel=False)
 
-            # Skip if already exists
-            if os.path.exists(os.path.join(out_dir, f"{fig_filename}.png")):
-                print(f"  SKIP: {fig_filename} (already exists)")
-                continue
+            if r == 0:
+                ax.set_title(FUTURE_PERIODS[pkey][1], fontsize=11, fontweight="bold", pad=6)
+            if c == 0:
+                # Vertical scenario label, to the right of the baseline map.
+                ax.set_ylabel(SCENARIO_SHORT[ssp], rotation=90, fontsize=11,
+                              fontweight="bold", labelpad=8)
 
-            subsection(f"{decade_label} — {season_info['label']}")
+    # --- Legends ---
+    risk_patches = [mpatches.Patch(facecolor=RISK_COLORS[i], edgecolor="#aaaaaa",
+                                   linewidth=0.5, label=RISK_LABELS[i])
+                    for i in range(1, 6)]
+    fig.subplots_adjust(bottom=0.10)
 
-            fig, axes = plt.subplots(
-                n_rows, n_cols,
-                figsize=(5 * n_cols, 4.5 * n_rows),
-            )
-            # Ensure axes is always 2D
-            if n_rows == 1:
-                axes = axes[np.newaxis, :]
-            if n_cols == 1:
-                axes = axes[:, np.newaxis]
+    if mode == "normal":
+        fig.legend(handles=risk_patches, title="Fire Risk", loc="lower center",
+                   ncol=5, frameon=True, edgecolor="#cccccc",
+                   bbox_to_anchor=(0.5, 0.02), fontsize=10, title_fontsize=10)
+        mode_label = "by period"
+    else:
+        # Baseline (absolute) legend on the left, Δ colorbar on the right.
+        fig.legend(handles=risk_patches, title="Baseline risk", loc="lower left",
+                   ncol=2, frameon=True, edgecolor="#cccccc",
+                   bbox_to_anchor=(0.08, 0.02), fontsize=9, title_fontsize=9)
+        sm = cm.ScalarMappable(cmap=delta_cmap, norm=delta_norm); sm.set_array([])
+        cax = fig.add_axes([0.55, 0.06, 0.35, 0.018])
+        cb  = fig.colorbar(sm, cax=cax, orientation="horizontal",
+                           ticks=range(-4, 5))
+        cb.set_label("Δ risk class (future − baseline)", fontsize=9)
+        mode_label = "change vs baseline"
 
-            fig.suptitle(
-                f"Mean Fire Risk — {season_info['label']} | {decade_label}",
-                fontsize=13, fontweight="bold", y=1.01,
-            )
-
-            for row_idx, (model_key, model_short) in enumerate(MODELS.items()):
-                breaks = all_breaks.get(model_short)
-
-                for col_idx, scenario in enumerate(SSP_SCENARIOS):
-                    ax = axes[row_idx, col_idx]
-
-                    # Column header (scenario) — top row only
-                    if row_idx == 0:
-                        ax.set_title(
-                            SCENARIO_LABELS[scenario], fontsize=9, pad=6)
-
-                    # Row label (model) — left column only
-                    if col_idx == 0:
-                        ax.set_ylabel(model_short, fontsize=9, labelpad=6)
-
-                    if breaks is None:
-                        ax.text(0.5, 0.5, "No Jenks breaks",
-                                ha="center", va="center",
-                                transform=ax.transAxes, fontsize=8)
-                        ax.axis("off")
-                        continue
-
-                    # Load decade predictions
-                    df = load_decade_predictions(
-                        model_short, scenario, decade_years)
-                    if df is None:
-                        ax.text(0.5, 0.5, "No data",
-                                ha="center", va="center",
-                                transform=ax.transAxes, fontsize=8)
-                        ax.axis("off")
-                        continue
-
-                    # Filter to season months
-                    df_season = df[df["month"].isin(season_info["months"])]
-                    if df_season.empty:
-                        ax.text(0.5, 0.5, "No data (season filter)",
-                                ha="center", va="center",
-                                transform=ax.transAxes, fontsize=8)
-                        ax.axis("off")
-                        continue
-
-                    # Apply Jenks breaks
-                    df_season = apply_breaks_to_df(df_season, breaks)
-
-                    # Render raster — no title on individual panels (handled above)
-                    plot_risk_raster_ax(ax, df_season, breaks, title="")
-
-            # Shared legend below figure
-            fig.legend(
-                handles=legend_patches,
-                loc="lower center",
-                ncol=N_RISK_CLASSES,
-                bbox_to_anchor=(0.5, -0.02),
-                frameon=False,
-                fontsize=9,
-            )
-
-            plt.tight_layout()
-            save_figure(fig, out_dir, fig_filename)
-            plt.close(fig)
-
-    print("\n  Decadal seasonal maps complete.")
-
-
-def plot_monthly_climatology_maps(all_breaks):
-    """
-    Produce monthly climatology maps for each decade.
-    Layout: rows = models, columns = SSP scenarios.
-    One figure per decade × calendar month (12 months × 8 decades = 96 figures).
-    """
-    section("Plotting monthly climatology maps...")
-
-    legend_patches = build_legend_patches()
-
-    n_rows = len(MODELS)
-    n_cols = len(SSP_SCENARIOS)
-
-    for decade_label, decade_years in DECADES.items():
-        for month_num, month_name in MONTH_NAMES.items():
-
-            month_str    = f"{month_num:02d}"
-            fig_filename = f"month_{month_str}_{month_name.lower()}"
-            out_dir      = os.path.join(OUTPUT_DIR, "climatology",
-                                        f"decade_{decade_label}")
-
-            # Skip if already exists
-            if os.path.exists(os.path.join(out_dir, f"{fig_filename}.png")):
-                print(f"  SKIP: decade_{decade_label}/{fig_filename} (already exists)")
-                continue
-
-            subsection(f"{decade_label} — {month_name}")
-
-            fig, axes = plt.subplots(
-                n_rows, n_cols,
-                figsize=(5 * n_cols, 4.5 * n_rows),
-            )
-            if n_rows == 1:
-                axes = axes[np.newaxis, :]
-            if n_cols == 1:
-                axes = axes[:, np.newaxis]
-
-            fig.suptitle(
-                f"Mean Fire Risk — {month_name} | {decade_label}",
-                fontsize=13, fontweight="bold", y=1.01,
-            )
-
-            for row_idx, (model_key, model_short) in enumerate(MODELS.items()):
-                breaks = all_breaks.get(model_short)
-
-                for col_idx, scenario in enumerate(SSP_SCENARIOS):
-                    ax = axes[row_idx, col_idx]
-
-                    if row_idx == 0:
-                        ax.set_title(
-                            SCENARIO_LABELS[scenario], fontsize=9, pad=6)
-                    if col_idx == 0:
-                        ax.set_ylabel(model_short, fontsize=9, labelpad=6)
-
-                    if breaks is None:
-                        ax.text(0.5, 0.5, "No Jenks breaks",
-                                ha="center", va="center",
-                                transform=ax.transAxes, fontsize=8)
-                        ax.axis("off")
-                        continue
-
-                    # Load decade predictions
-                    df = load_decade_predictions(
-                        model_short, scenario, decade_years)
-                    if df is None:
-                        ax.text(0.5, 0.5, "No data",
-                                ha="center", va="center",
-                                transform=ax.transAxes, fontsize=8)
-                        ax.axis("off")
-                        continue
-
-                    # Filter to this calendar month only
-                    df_month = df[df["month"] == month_num]
-                    if df_month.empty:
-                        ax.text(0.5, 0.5, "No data (month filter)",
-                                ha="center", va="center",
-                                transform=ax.transAxes, fontsize=8)
-                        ax.axis("off")
-                        continue
-
-                    # Apply Jenks breaks
-                    df_month = apply_breaks_to_df(df_month, breaks)
-
-                    plot_risk_raster_ax(ax, df_month, breaks, title="")
-
-            fig.legend(
-                handles=legend_patches,
-                loc="lower center",
-                ncol=N_RISK_CLASSES,
-                bbox_to_anchor=(0.5, -0.02),
-                frameon=False,
-                fontsize=9,
-            )
-
-            plt.tight_layout()
-            save_figure(fig, out_dir, fig_filename)
-            plt.close(fig)
-
-    print("\n  Monthly climatology maps complete.")
+    fig.suptitle(f"{MODEL_DISPLAY[model_key]} — Fire-season fire risk ({mode_label})",
+                 fontsize=14, fontweight="bold", y=0.97)
+    save_figure(fig, f"fig2_{model_short}_{mode}")
 
 
 # =============================================================================
@@ -482,37 +309,48 @@ def plot_monthly_climatology_maps(all_breaks):
 # =============================================================================
 
 def main():
-    sns.set_style("whitegrid")
-
-    # --- Load Jenks breaks for all models upfront ---
-    section("Loading Jenks breaks...")
-    all_breaks = {}
-    for model_key, model_short in MODELS.items():
-        breaks = load_jenks_breaks(model_short)
-        if breaks is None:
-            print(f"  WARNING: Could not load breaks for {model_short} — "
-                  f"this model will show 'No Jenks breaks' in all panels.")
-        else:
-            print(f"  {model_short}: {breaks}")
-        all_breaks[model_short] = breaks
-
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    all_trends = {}
 
-    # --- Decadal seasonal maps ---
-    plot_decadal_seasonal_maps(all_breaks)
+    for model_key, model_short in MODELS.items():
+        section(f"Processing {MODEL_DISPLAY[model_key]} ({model_short})")
 
-    # --- Monthly climatology maps ---
-    plot_monthly_climatology_maps(all_breaks)
+        thr_path = os.path.join(THRESHOLDS_DIR, model_short, "risk_thresholds.json")
+        if not os.path.exists(thr_path):
+            print(f"  ERROR: risk_thresholds.json not found for {model_short} "
+                  f"— run 05_compute_risk_thresholds.py. Skipping model.")
+            continue
+        breaks = load_thresholds(thr_path)["breaks"]
 
-    print()
-    print("=" * 60)
-    print("ALL FIGURES COMPLETE")
-    print("=" * 60)
-    print(f"  Output directory: {OUTPUT_DIR}/")
-    print(f"    seasonal/dry/     — {len(DECADES)} figures")
-    print(f"    seasonal/wet/     — {len(DECADES)} figures")
-    print(f"    climatology/      — {len(DECADES) * len(MONTH_NAMES)} figures "
-          f"({len(DECADES)} decades × 12 months)")
+        # Historical: trend (1961–2014) + baseline period (1991–2014).
+        trend_hist, cells_hist = process_model_scenario(
+            model_short, "historical", breaks, HIST_YEARS,
+            {"baseline": BASELINE_YEARS})
+
+        trends      = {"historical": trend_hist}
+        period_cells = {"baseline": cells_hist.get("baseline")}
+
+        # Each SSP: trend (2015–2100) + mid/end periods.
+        for ssp in SSP_SCENARIOS:
+            t, cells = process_model_scenario(
+                model_short, ssp, breaks, FUTURE_YEARS,
+                {name: rng for name, (rng, _) in FUTURE_PERIODS.items()})
+            trends[ssp] = t
+            for pkey in FUTURE_PERIODS:
+                if pkey in cells:
+                    period_cells[(ssp, pkey)] = cells[pkey]
+
+        all_trends[model_short] = trends
+        period_cells = {k: v for k, v in period_cells.items() if v is not None}
+
+        # Figure 2 (both versions) for this model.
+        render_spatial_figure(model_key, model_short, period_cells, breaks, "normal")
+        render_spatial_figure(model_key, model_short, period_cells, breaks, "change")
+
+    if all_trends:
+        render_trend_figure(all_trends)
+
+    print("\nAll future-classification figures complete. Output:", OUTPUT_DIR)
 
 
 if __name__ == "__main__":

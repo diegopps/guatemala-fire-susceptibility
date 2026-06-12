@@ -7,9 +7,10 @@ Renders each 1km grid cell as an exact pixel using pcolormesh() on a
 reconstructed 2D raster from center coordinates. No interpolation is
 applied — class boundaries are preserved exactly.
 
-Administrative boundaries (country outline + departments) are overlaid
-using Natural Earth data via geopandas + geodatasets. No external
-shapefiles required.
+Administrative boundaries (departments + country outline) are overlaid using
+Natural Earth's admin-1 layer. The shapefile is downloaded once and cached
+under data/boundaries/; Guatemala's departments are filtered from it and the
+country outline is the union of those departments.
 
 Functions
 ---------
@@ -20,19 +21,19 @@ plot_risk_map(
     risk_col       : str = "risk_class",
 )
 
-plot_seasonal_maps(
-    df             : pd.DataFrame,
-    model_label    : str,
-    output_dir     : str,
+plot_risk_map_grid(
+    panels         : list of {"df": pd.DataFrame, "title": str},
+    output_path    : str,
+    nrows          : int,
+    ncols          : int,
+    suptitle       : str = None,
+    panel_letters  : bool = False,
     risk_col       : str = "risk_class",
 )
 
-plot_monthly_climatology(
-    df             : pd.DataFrame,
-    model_label    : str,
-    output_dir     : str,
-    risk_col       : str = "risk_class",
-)
+Aggregation of multiple month/year records to one risk class per cell is the
+caller's responsibility (mean probability per cell, then apply Jenks breaks);
+these functions only render pre-classified maps.
 
 Parameters (plot_risk_map)
 --------------------------
@@ -43,8 +44,9 @@ risk_col     : str — column name containing integer risk class (1–5)
 
 Notes
 -----
-- Requires: geopandas, geodatasets, matplotlib, numpy, pandas
-- Install geodatasets if needed: pip install geodatasets
+- Requires: geopandas, matplotlib, numpy, pandas
+- Boundary shapefile auto-downloaded once to data/boundaries/ (needs internet
+  on first run; on offline nodes, pre-place the .zip — see _ensure_admin1_shapefile)
 - Risk classes: 1=very low, 2=low, 3=medium, 4=high, 5=very high
 - Missing/unclassified cells rendered in white
 - Dry season: Nov–Apr | Wet season: May–Oct
@@ -52,6 +54,8 @@ Notes
 
 import os
 import warnings
+import zipfile
+import urllib.request
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -60,14 +64,6 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.colors as mcolors
 import geopandas as gpd
-
-try:
-    import geodatasets
-except ImportError:
-    raise ImportError(
-        "The 'geodatasets' package is required for boundary data. "
-        "Install it with: pip install geodatasets"
-    )
 
 # =============================================================================
 # STYLE & CONSTANTS
@@ -116,40 +112,95 @@ COUNTRY_EDGECOLOR = "#000000"
 GT_LON_MIN, GT_LON_MAX = -92.3, -88.2
 GT_LAT_MIN, GT_LAT_MAX =  13.7,  17.9
 
+# Per-panel size (inches) for multi-panel grids
+PANEL_W = 4.6
+PANEL_H = 4.7
+
+# Cache for the (country, departments) boundary GeoDataFrames — loaded once,
+# reused across every map (avoids re-reading Natural Earth on each call).
+_BOUNDARY_CACHE = None
+
+# Natural Earth admin-1 (states/provinces) boundaries. geodatasets does not
+# ship this layer, so we download it once and cache it under data/boundaries/.
+# Guatemala's departments are filtered from it; the country outline is the union
+# of those departments.
+NE_ADMIN1_URL = ("https://naturalearth.s3.amazonaws.com/"
+                 "10m_cultural/ne_10m_admin_1_states_provinces.zip")
+NE_ADMIN1_NAME = "ne_10m_admin_1_states_provinces"
+BOUNDARY_DIR  = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "data", "boundaries")
+)
+
 
 # =============================================================================
 # HELPERS
 # =============================================================================
 
+def _ensure_admin1_shapefile():
+    """
+    Return the path to the Natural Earth admin-1 shapefile, downloading and
+    extracting it into data/boundaries/ on first use.
+
+    Raises a clear error (with the URL and target path) if the download fails —
+    e.g. on an offline compute node, in which case fetch it manually on a node
+    with internet access and drop the .zip in place.
+    """
+    shp_dir  = os.path.join(BOUNDARY_DIR, NE_ADMIN1_NAME)
+    shp_path = os.path.join(shp_dir, f"{NE_ADMIN1_NAME}.shp")
+    if os.path.exists(shp_path):
+        return shp_path
+
+    os.makedirs(BOUNDARY_DIR, exist_ok=True)
+    zip_path = os.path.join(BOUNDARY_DIR, f"{NE_ADMIN1_NAME}.zip")
+
+    if not os.path.exists(zip_path):
+        print(f"  Downloading Natural Earth admin-1 boundaries:\n    {NE_ADMIN1_URL}")
+        try:
+            urllib.request.urlretrieve(NE_ADMIN1_URL, zip_path)
+        except Exception as e:
+            raise RuntimeError(
+                f"Could not download Natural Earth admin-1 boundaries ({e}).\n"
+                f"If this node has no internet, download the file manually from:\n"
+                f"    {NE_ADMIN1_URL}\n"
+                f"and place it at:\n    {zip_path}"
+            )
+
+    with zipfile.ZipFile(zip_path) as zf:
+        zf.extractall(shp_dir)
+
+    if os.path.exists(shp_path):
+        return shp_path
+    # Fallback: archive may not use the expected filename — pick any .shp
+    for f in os.listdir(shp_dir):
+        if f.endswith(".shp"):
+            return os.path.join(shp_dir, f)
+    raise FileNotFoundError(f"No .shp found after extracting {zip_path}")
+
+
 def _load_boundaries():
     """
-    Load Guatemala country and department boundaries from Natural Earth
-    via geodatasets. Returns (country_gdf, departments_gdf).
+    Load Guatemala department and country boundaries from Natural Earth's
+    admin-1 layer. Departments are filtered by admin == "Guatemala"; the country
+    outline is the union (dissolve) of those departments.
+
+    Returns (country_gdf, departments_gdf). Cached after the first call.
     """
-    try:
-        ne_path = geodatasets.get_path("naturalearth admin_1_states_provinces")
-        admin1  = gpd.read_file(ne_path)
-    except Exception:
-        # Fallback path name variation
-        ne_path = geodatasets.get_path("naturalearth.admin_1_states_provinces")
-        admin1  = gpd.read_file(ne_path)
+    global _BOUNDARY_CACHE
+    if _BOUNDARY_CACHE is not None:
+        return _BOUNDARY_CACHE
 
+    admin1      = gpd.read_file(_ensure_admin1_shapefile())
     departments = admin1[admin1["admin"] == "Guatemala"].copy()
+    if departments.empty:
+        raise ValueError(
+            "No Guatemala features found in the Natural Earth admin-1 layer "
+            "(expected column 'admin' == 'Guatemala')."
+        )
 
-    try:
-        ne_countries = geodatasets.get_path("naturalearth land")
-        countries    = gpd.read_file(ne_countries)
-    except Exception:
-        ne_countries = geodatasets.get_path("naturalearth.land")
-        countries    = gpd.read_file(ne_countries)
+    country = departments.dissolve()  # union of departments -> country outline
 
-    # Clip country outline to Guatemala bounding box
-    from shapely.geometry import box
-    bbox    = box(GT_LON_MIN - 0.1, GT_LAT_MIN - 0.1,
-                  GT_LON_MAX + 0.1, GT_LAT_MAX + 0.1)
-    country = countries.clip(bbox)
-
-    return country, departments
+    _BOUNDARY_CACHE = (country, departments)
+    return _BOUNDARY_CACHE
 
 
 def _build_raster(df, risk_col):
@@ -171,17 +222,15 @@ def _build_raster(df, risk_col):
     lon_edges = np.append(lons - dlon / 2, lons[-1] + dlon / 2)
     lat_edges = np.append(lats + dlat / 2, lats[-1] - dlat / 2)
 
-    # Map lat/lon to raster indices
+    # Map lat/lon to raster indices (vectorized — no per-row Python loop)
     lon_idx = {v: i for i, v in enumerate(lons)}
     lat_idx = {v: i for i, v in enumerate(lats)}
 
     raster = np.zeros((len(lats), len(lons)), dtype=float)  # 0 = missing
 
-    for _, row in df.iterrows():
-        r = lat_idx.get(row["lat"])
-        c = lon_idx.get(row["lon"])
-        if r is not None and c is not None:
-            raster[r, c] = row[risk_col]
+    rows = df["lat"].map(lat_idx).to_numpy()
+    cols = df["lon"].map(lon_idx).to_numpy()
+    raster[rows, cols] = df[risk_col].to_numpy()
 
     return raster, lon_edges, lat_edges
 
@@ -192,6 +241,19 @@ def _make_colormap():
     cmap   = mcolors.ListedColormap(colors)
     norm   = mcolors.BoundaryNorm(boundaries=[-0.5, 0.5, 1.5, 2.5, 3.5, 4.5, 5.5],
                                    ncolors=6)
+    return cmap, norm
+
+
+def make_delta_cmap(vmax=4):
+    """
+    Discrete diverging colormap + norm for integer risk-class CHANGES in
+    [-vmax, +vmax]. Blue = risk decreased, white = no change, red = increased.
+    Returns (cmap, norm).
+    """
+    n    = 2 * vmax + 1
+    cmap = plt.get_cmap("RdBu_r", n)
+    norm = mcolors.BoundaryNorm(
+        boundaries=np.arange(-vmax - 0.5, vmax + 1.5, 1.0), ncolors=n)
     return cmap, norm
 
 
@@ -241,6 +303,36 @@ def _save_figure(fig, output_path):
 # MAIN PLOT FUNCTION
 # =============================================================================
 
+def _render_risk_map(ax, df, title, risk_col="risk_class",
+                     country=None, departments=None, cmap=None, norm=None,
+                     show_xlabel=True, show_ylabel=True):
+    """
+    Render a single risk map onto a provided axes (no legend, no saving).
+
+    Shared by plot_risk_map() and plot_risk_map_grid(). Pass pre-loaded
+    boundaries / colormap to avoid recomputing them for every panel.
+    """
+    if country is None or departments is None:
+        country, departments = _load_boundaries()
+    if cmap is None or norm is None:
+        cmap, norm = _make_colormap()
+
+    raster, lon_edges, lat_edges = _build_raster(df, risk_col)
+
+    ax.pcolormesh(lon_edges, lat_edges, raster, cmap=cmap, norm=norm,
+                  shading="flat", rasterized=True)
+    _add_boundaries(ax, country, departments)
+
+    ax.set_xlim(GT_LON_MIN, GT_LON_MAX)
+    ax.set_ylim(GT_LAT_MIN, GT_LAT_MAX)
+    if show_xlabel:
+        ax.set_xlabel("Longitude", fontsize=9)
+    if show_ylabel:
+        ax.set_ylabel("Latitude", fontsize=9)
+    ax.set_title(title, fontsize=11, pad=8)
+    ax.tick_params(labelsize=8)
+
+
 def plot_risk_map(df, title, output_path, risk_col="risk_class"):
     """
     Plot a single fire risk classification map for Guatemala.
@@ -254,132 +346,85 @@ def plot_risk_map(df, title, output_path, risk_col="risk_class"):
     """
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-    print(f"  Building raster...")
-    raster, lon_edges, lat_edges = _build_raster(df, risk_col)
-
-    print(f"  Loading boundaries...")
-    country, departments = _load_boundaries()
-
-    cmap, norm = _make_colormap()
-
     fig, ax = plt.subplots(figsize=FIGURE_SIZE)
-
-    # Plot raster
-    ax.pcolormesh(lon_edges, lat_edges, raster, cmap=cmap, norm=norm,
-                  shading="flat", rasterized=True)
-
-    # Overlay boundaries
-    _add_boundaries(ax, country, departments)
-
-    # Formatting
-    ax.set_xlim(GT_LON_MIN, GT_LON_MAX)
-    ax.set_ylim(GT_LAT_MIN, GT_LAT_MAX)
-    ax.set_xlabel("Longitude", fontsize=10)
-    ax.set_ylabel("Latitude", fontsize=10)
-    ax.set_title(title, fontsize=13, pad=12)
-    ax.tick_params(labelsize=9)
-
+    _render_risk_map(ax, df, title=title, risk_col=risk_col)
     _add_legend(ax)
-
     fig.tight_layout()
     _save_figure(fig, output_path)
 
 
 # =============================================================================
-# SEASONAL MAPS (results section)
+# MULTI-PANEL GRID (model comparison + monthly climatology)
 # =============================================================================
 
-def plot_seasonal_maps(df, model_label, output_dir, risk_col="risk_class"):
+def plot_risk_map_grid(panels, output_path, nrows, ncols,
+                       suptitle=None, panel_letters=False, risk_col="risk_class"):
     """
-    Produce two maps for the results section:
-      1. Dry season mean risk (Nov–Apr)
-      2. Wet season mean risk (May–Oct)
-
-    Risk class per cell is determined by rounding the mean risk class
-    across all months in the season across all years.
+    Render several pre-classified risk maps as a single multi-panel figure
+    with one shared legend.
 
     Parameters
     ----------
-    df          : pd.DataFrame with columns: lat, lon, month, <risk_col>
-    model_label : str — e.g. "RF_final"
-    output_dir  : str — directory to save figures
-    risk_col    : str — column containing integer risk class (1–5)
+    panels        : list of dict — each {"df": DataFrame, "title": str}, where
+                    df has columns lat, lon, <risk_col> already aggregated to one
+                    integer risk class (1–5) per cell.
+    output_path   : str — output path without extension (PNG + PDF + SVG saved)
+    nrows, ncols  : int — grid layout. nrows * ncols must be >= len(panels).
+    suptitle      : str or None — overall figure title.
+    panel_letters : bool — if True, prefix each panel title with "A) ", "B) " …
+                    for cross-referencing in the text.
+    risk_col      : str — column containing the integer risk class (1–5).
     """
-    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-    seasons = {
-        "dry": {"months": DRY_MONTHS, "label": "Dry Season (Nov–Apr)"},
-        "wet": {"months": WET_MONTHS, "label": "Wet Season (May–Oct)"},
-    }
+    country, departments = _load_boundaries()   # cached after first call
+    cmap, norm = _make_colormap()
+    letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-    for season_key, season_info in seasons.items():
-        print(f"\n  Plotting {season_info['label']} map for {model_label}...")
+    fig, axes = plt.subplots(nrows, ncols,
+                             figsize=(PANEL_W * ncols, PANEL_H * nrows),
+                             squeeze=False)
+    axes_flat = axes.flatten()
 
-        subset = df[df["month"].isin(season_info["months"])].copy()
-
-        if subset.empty:
-            print(f"  WARNING: No data for {season_info['label']} — skipping.")
+    for i, ax in enumerate(axes_flat):
+        if i >= len(panels):
+            ax.axis("off")
             continue
 
-        # Mean risk class per cell across all years in the season, rounded
-        agg = (subset.groupby(["lat", "lon"])[risk_col]
-               .mean()
-               .round()
-               .clip(1, 5)
-               .astype(int)
-               .reset_index())
-        agg.columns = ["lat", "lon", risk_col]
+        panel = panels[i]
+        title = panel["title"]
+        if panel_letters:
+            title = f"{letters[i]}) {title}"
 
-        title       = f"{model_label} — Fire Risk: {season_info['label']}"
-        output_path = os.path.join(output_dir,
-                                   f"{model_label}_risk_map_{season_key}")
+        row, col = divmod(i, ncols)
+        print(f"  Rendering panel {i + 1}/{len(panels)}: {title}")
+        _render_risk_map(
+            ax, panel["df"], title=title, risk_col=risk_col,
+            country=country, departments=departments, cmap=cmap, norm=norm,
+            show_xlabel=(row == nrows - 1),
+            show_ylabel=(col == 0),
+        )
 
-        plot_risk_map(agg, title=title, output_path=output_path,
-                      risk_col=risk_col)
+    # Single shared legend for the whole figure
+    patches = [
+        mpatches.Patch(facecolor=RISK_COLORS[i], edgecolor="#aaaaaa",
+                       linewidth=0.5, label=RISK_LABELS[i])
+        for i in range(1, 6)
+    ]
+    fig.legend(
+        handles=patches,
+        title="Fire Risk",
+        loc="lower center",
+        ncol=5,
+        fontsize=10,
+        title_fontsize=10,
+        frameon=True,
+        edgecolor="#cccccc",
+        bbox_to_anchor=(0.5, -0.02),
+    )
 
+    if suptitle:
+        fig.suptitle(suptitle, fontsize=15, fontweight="bold", y=1.0)
 
-# =============================================================================
-# MONTHLY CLIMATOLOGY MAPS (appendix)
-# =============================================================================
-
-def plot_monthly_climatology(df, model_label, output_dir, risk_col="risk_class"):
-    """
-    Produce 12 maps for the appendix — one per calendar month, averaged
-    across all years (monthly climatology).
-
-    Risk class per cell is determined by rounding the mean risk class
-    for that calendar month across all years.
-
-    Parameters
-    ----------
-    df          : pd.DataFrame with columns: lat, lon, month, <risk_col>
-    model_label : str — e.g. "RF_final"
-    output_dir  : str — directory to save figures
-    risk_col    : str — column containing integer risk class (1–5)
-    """
-    os.makedirs(output_dir, exist_ok=True)
-
-    for month_num, month_name in MONTH_NAMES.items():
-        print(f"\n  Plotting monthly climatology: {month_name} ({model_label})...")
-
-        subset = df[df["month"] == month_num].copy()
-
-        if subset.empty:
-            print(f"  WARNING: No data for {month_name} — skipping.")
-            continue
-
-        # Mean risk class per cell across all years for this month, rounded
-        agg = (subset.groupby(["lat", "lon"])[risk_col]
-               .mean()
-               .round()
-               .clip(1, 5)
-               .astype(int)
-               .reset_index())
-        agg.columns = ["lat", "lon", risk_col]
-
-        title       = f"{model_label} — Fire Risk: {month_name} (climatology)"
-        output_path = os.path.join(output_dir,
-                                   f"{model_label}_risk_map_month{month_num:02d}_{month_name.lower()}")
-
-        plot_risk_map(agg, title=title, output_path=output_path,
-                      risk_col=risk_col)
+    fig.tight_layout(rect=[0, 0.05, 1, 0.97])
+    _save_figure(fig, output_path)
