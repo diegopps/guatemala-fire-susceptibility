@@ -7,21 +7,27 @@ including standard evaluation plots and top-k coverage analysis.
 This script:
   1. Loads metrics.json for each model (test + val) → calls plot_model_comparison()
      twice: once for test set, once for val set.
-  2. Loads confusion_matrix.csv for each model (test + val) → calls
-     plot_confusion_matrix() once per model per subset (6 figures total).
-  3. Loads pr_curve.csv for each model (test + val) → calls plot_pr_curve()
-     once per model per subset (6 figures total).
-  4. Loads roc_curve.csv for each model (test + val) → calls plot_roc_curve()
-     once per model per subset (6 figures total).
-  5. Loads feature_importance.csv for each model → calls plot_feature_importance()
-     once per model (3 figures total, threshold-independent).
+  2. Loads confusion_matrix.csv for each model (test + val) → one unified panel
+     figure per subset (3 rows × 1 col, one row per model).
+  3. Loads pr_curve.csv for each model (test + val) → one unified panel figure
+     per subset.
+  4. Loads roc_curve.csv for each model (test + val) → one unified panel figure
+     per subset.
+  5. Loads feature_importance.csv for each model → one unified panel figure
+     (threshold-independent).
   6. Loads predictions.csv for each model (test + val), computes top-k coverage
      at k = 1%, 2%, 5%, 10% → calls plot_topk_coverage() once per subset
      (2 figures total), each showing all k levels as grouped bars per model.
 
+Each panel figure has 3 rows (one per model), with:
+  - A vertical model label on the left side of each row.
+  - A floating letter (A), B), C)) at the top-left of each row for figure
+    referencing (e.g. "Figure 1-A").
+
 Output naming convention:
   - Metrics comparison : final_model_comparison_<subset>.<ext>
-  - All others         : <MODEL_SHORT>_final_<plot_type>_<subset>.<ext>
+  - Panel figures      : <plot_type>_panel_<subset>.<ext>
+  - Feature importance : feature_importance_panel.<ext>
   - Top-k              : topk_coverage_top<k>pct_<subset>.<ext>
 
 NOTE: Do NOT modify the plotter modules in utils/.
@@ -60,10 +66,10 @@ import pandas as pd
 
 sys.path.append(os.path.join(PROJECT_DIR, "src", "utils"))
 from plot_metrics import plot_model_comparison
-from plot_confmatrix import plot_confusion_matrix
-from plot_prcurve import plot_pr_curve
-from plot_roccurve import plot_roc_curve
-from plot_featimportance import plot_feature_importance
+from plot_confmatrix_panel import plot_confusion_matrix_panel
+from plot_prcurve_panel import plot_pr_curve_panel
+from plot_roccurve_panel import plot_roc_curve_panel
+from plot_featimportance_panel import plot_feature_importance_panel
 from plot_topk import plot_topk_coverage
 
 # =============================================================================
@@ -165,18 +171,19 @@ def main():
             metrics_list=metrics_list,
             output_dir=OUTPUT_DIR,
             filename_prefix=f"final_model_comparison_{subset}",
-            title=f"Final Model Comparison — {subset.capitalize()} Set (MCC at committed threshold)",
+            title="Final Model Comparison (MCC at committed threshold)",
         )
 
     # -------------------------------------------------------------------------
-    # 2. Confusion matrices — one figure per model per subset
+    # 2. Confusion matrices — one unified panel figure per subset
     # -------------------------------------------------------------------------
-    section("Plotting confusion matrices...")
+    section("Plotting confusion matrices (panel)...")
 
-    for model_key, model_short in MODELS.items():
-        for subset in SUBSETS:
-            directory = model_dir(model_short)
-            cm_path   = os.path.join(directory, f"confusion_matrix_{subset}.csv")
+    for subset in SUBSETS:
+        cm_panel_data = []
+
+        for model_key, model_short in MODELS.items():
+            cm_path = os.path.join(model_dir(model_short), f"confusion_matrix_{subset}.csv")
 
             if not os.path.exists(cm_path):
                 print(f"  WARNING: confusion_matrix_{subset}.csv not found for "
@@ -189,28 +196,37 @@ def main():
                 cm_df["predicted_positive"].values,
             ])
 
-            label = f"{model_short}_final_{subset}"
-            # Show the committed (MCC-optimal) threshold in the title; keep the
-            # filename clean so re-runs overwrite cleanly.
-            metrics    = load_metrics(model_short, subset)
-            thresh     = metrics.get("threshold") if metrics else None
-            title_name = f"{label} (thr={thresh:.4g})" if thresh is not None else label
+            metrics = load_metrics(model_short, subset)
+            thresh  = metrics.get("threshold") if metrics else None
 
-            print(f"  Plotting confusion matrix for: {label}")
-            plot_confusion_matrix(
-                cm=cm,
-                model_name=title_name,
-                output_dir=OUTPUT_DIR,
-                filename_prefix=f"confusion_matrix_{label}",
-            )
+            print(f"  Loaded confusion matrix for: {model_short} ({subset})")
+            cm_panel_data.append({
+                "model_name": f"{model_short}",
+                "cm":         cm,
+                "threshold":  f"{thresh:.4g}" if thresh is not None else "N/A",
+            })
+
+        if not cm_panel_data:
+            print(f"  WARNING: No confusion matrix data for subset '{subset}' — skipping.")
+            continue
+
+        print(f"  Plotting confusion matrix panel for {subset} set...")
+        plot_confusion_matrix_panel(
+            models_data=cm_panel_data,
+            output_dir=OUTPUT_DIR,
+            filename=f"confusion_matrix_panel_{subset}",
+            title="Confusion Matrices",
+        )
 
     # -------------------------------------------------------------------------
-    # 3. PR curves — one figure per model per subset
+    # 3. PR curves — one unified panel figure per subset
     # -------------------------------------------------------------------------
-    section("Plotting Precision-Recall curves...")
+    section("Plotting Precision-Recall curves (panel)...")
 
-    for model_key, model_short in MODELS.items():
-        for subset in SUBSETS:
+    for subset in SUBSETS:
+        pr_panel_data = []
+
+        for model_key, model_short in MODELS.items():
             label   = f"{model_short}_final_{subset}"
             pr_path = os.path.join(model_dir(model_short), f"pr_curve_{subset}.csv")
 
@@ -223,7 +239,7 @@ def main():
 
             metrics = load_metrics(model_short, subset)
             if metrics is None:
-                print(f"  WARNING: metrics_*_{subset}.json not found for "
+                print(f"  WARNING: metrics_{subset}.json not found for "
                       f"'{model_short}' — skipping.")
                 continue
 
@@ -241,22 +257,35 @@ def main():
                       f"'{model_short}', prevalence will default to 0.")
                 prevalence = 0.0
 
-            print(f"  Plotting PR curve for: {label}")
-            plot_pr_curve(
-                pr_df=pr_df,
-                model_name=label,
-                avg_precision=avg_precision,
-                prevalence=prevalence,
-                output_dir=OUTPUT_DIR,
-            )
+            print(f"  Loaded PR curve for: {label}")
+            pr_panel_data.append({
+                "model_name":    model_short,
+                "pr_df":         pr_df,
+                "avg_precision": avg_precision,
+                "prevalence":    prevalence,
+            })
+
+        if not pr_panel_data:
+            print(f"  WARNING: No PR curve data for subset '{subset}' — skipping.")
+            continue
+
+        print(f"  Plotting PR curve panel for {subset} set...")
+        plot_pr_curve_panel(
+            models_data=pr_panel_data,
+            output_dir=OUTPUT_DIR,
+            filename=f"pr_curve_panel_{subset}",
+            title="Precision-Recall Curves",
+        )
 
     # -------------------------------------------------------------------------
-    # 4. ROC curves — one figure per model per subset
+    # 4. ROC curves — one unified panel figure per subset
     # -------------------------------------------------------------------------
-    section("Plotting ROC curves...")
+    section("Plotting ROC curves (panel)...")
 
-    for model_key, model_short in MODELS.items():
-        for subset in SUBSETS:
+    for subset in SUBSETS:
+        roc_panel_data = []
+
+        for model_key, model_short in MODELS.items():
             label    = f"{model_short}_final_{subset}"
             roc_path = os.path.join(model_dir(model_short), f"roc_curve_{subset}.csv")
 
@@ -269,7 +298,7 @@ def main():
 
             metrics = load_metrics(model_short, subset)
             if metrics is None:
-                print(f"  WARNING: metrics_*_{subset}.json not found for "
+                print(f"  WARNING: metrics_{subset}.json not found for "
                       f"'{model_short}' — skipping.")
                 continue
 
@@ -278,21 +307,32 @@ def main():
                 print(f"  WARNING: roc_auc missing for '{label}' — skipping.")
                 continue
 
-            print(f"  Plotting ROC curve for: {label}")
-            plot_roc_curve(
-                roc_df=roc_df,
-                model_name=label,
-                roc_auc=roc_auc,
-                output_dir=OUTPUT_DIR,
-            )
+            print(f"  Loaded ROC curve for: {label}")
+            roc_panel_data.append({
+                "model_name": model_short,
+                "roc_df":     roc_df,
+                "roc_auc":    roc_auc,
+            })
+
+        if not roc_panel_data:
+            print(f"  WARNING: No ROC curve data for subset '{subset}' — skipping.")
+            continue
+
+        print(f"  Plotting ROC curve panel for {subset} set...")
+        plot_roc_curve_panel(
+            models_data=roc_panel_data,
+            output_dir=OUTPUT_DIR,
+            filename=f"roc_curve_panel_{subset}",
+            title="ROC Curves",
+        )
 
     # -------------------------------------------------------------------------
-    # 5. Feature importance — one figure per model (threshold-independent)
+    # 5. Feature importance — one unified panel figure (threshold-independent)
     # -------------------------------------------------------------------------
-    section("Plotting feature importances...")
+    section("Plotting feature importances (panel)...")
 
+    fi_panel_data = []
     for model_key, model_short in MODELS.items():
-        label   = f"{model_short}_final"
         fi_path = os.path.join(model_dir(model_short), "feature_importance.csv")
 
         if not os.path.exists(fi_path):
@@ -300,13 +340,22 @@ def main():
             continue
 
         importance_df = pd.read_csv(fi_path)
+        print(f"  Loaded feature importance for: {model_short}")
+        fi_panel_data.append({
+            "model_name":    model_short,
+            "importance_df": importance_df,
+        })
 
-        print(f"  Plotting feature importance for: {label}")
-        plot_feature_importance(
-            importance_df=importance_df,
-            model_name=label,
+    if fi_panel_data:
+        print("  Plotting feature importance panel...")
+        plot_feature_importance_panel(
+            models_data=fi_panel_data,
             output_dir=OUTPUT_DIR,
+            filename="feature_importance_panel",
+            title="Feature Importances — Final Models",
         )
+    else:
+        print("  WARNING: No feature importance data found — skipping panel.")
 
     # -------------------------------------------------------------------------
     # 6. Top-k coverage — one figure per k level per subset

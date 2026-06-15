@@ -50,18 +50,18 @@ import numpy as np
 # STYLE
 # =============================================================================
 
-sns.set_theme(style="whitegrid")
+sns.set_theme(style="whitegrid", context="paper", font="DejaVu Sans")
 
 FIGURE_SIZE        = (9, 5)
 DPI                = 300
-FONT_SIZE_TITLE    = 13
-FONT_SIZE_LABEL    = 11
-FONT_SIZE_TICK     = 10
-FONT_SIZE_ANNOTATE = 8
+FONT_SIZE_TITLE    = 12
+FONT_SIZE_LABEL    = 15
+FONT_SIZE_TICK     = 12
+FONT_SIZE_ANNOTATE = 13
 
 OUTPUT_FORMATS = ["png", "pdf", "svg"]
 
-PALETTE = sns.color_palette("muted")
+PALETTE = sns.color_palette("colorblind")
 
 
 # =============================================================================
@@ -138,12 +138,14 @@ def plot_topk_coverage(
     ax.set_xlabel("Top-k Threshold", fontsize=FONT_SIZE_LABEL)
     ax.set_ylim(0, 110)
     ax.tick_params(axis="y", labelsize=FONT_SIZE_TICK)
-    ax.legend(title="Model", fontsize=FONT_SIZE_TICK, title_fontsize=FONT_SIZE_TICK)
+    ax.legend(title="Model", fontsize=FONT_SIZE_TICK, title_fontsize=FONT_SIZE_TICK, frameon=False)
 
     ax.set_title(
         f"Top-k Coverage — {subset_label.capitalize()} Set\n"
         f"Proportion of fires captured within top-k% of cells ranked by predicted probability",
-        fontsize=FONT_SIZE_TITLE,
+        fontsize=FONT_SIZE_TITLE + 4,
+        fontweight="bold",
+        color="#1a1a2e",
     )
 
     sns.despine(left=False, bottom=False)

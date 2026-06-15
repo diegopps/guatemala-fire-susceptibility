@@ -73,7 +73,9 @@ def plot_feature_importance_panel(
     if n == 1:
         axes = [axes]
 
-    for ax, entry in zip(axes, models_data):
+    letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+    for idx, (ax, entry) in enumerate(zip(axes, models_data)):
         df       = entry["importance_df"].copy()
         m_name   = entry["model_name"]
 
@@ -152,8 +154,18 @@ def plot_feature_importance_panel(
         sns.despine(ax=ax, left=True)
 
         ax.set_title(
-            f"Feature Importance — {m_name}",
+            m_name,
             fontsize=TITLE_FONTSIZE, fontweight="bold", pad=10,
+        )
+        # Row letter — floats to the left of the subplot title
+        ax.text(
+            -0.18, 1.04,
+            f"{letters[idx]})",
+            transform=ax.transAxes,
+            fontsize=TITLE_FONTSIZE,
+            fontweight="bold",
+            va="top",
+            ha="left",
         )
 
     fig.suptitle(title, fontsize=SUPTITLE_FONTSIZE, fontweight="bold")

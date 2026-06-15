@@ -1,3 +1,14 @@
+"""
+corrheatmap.py
+--------------
+Computes the pairwise Pearson correlation matrix of the predictor variables
+from the training dataset and plots it as a lower-triangle annotated heatmap
+(variables renamed to publication-friendly labels). Non-feature columns
+(lat, lon, month, year, fire) are excluded.
+
+Output: figures/01_data_exploration/correlation_heatmap.png
+"""
+
 import os
 import pandas as pd
 import numpy as np

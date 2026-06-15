@@ -68,8 +68,9 @@ def plot_confusion_matrix_panel(
 
     axis_labels = ["Negative", "Positive"]
     quadrant_labels = [["TN", "FP"], ["FN", "TP"]]
+    letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-    for ax, entry in zip(axes, models_data):
+    for idx, (ax, entry) in enumerate(zip(axes, models_data)):
         cm_array = np.array(entry["cm"])
         row_sums = cm_array.sum(axis=1, keepdims=True)
         cm_prop  = cm_array / row_sums.astype(float)
@@ -116,8 +117,18 @@ def plot_confusion_matrix_panel(
         ax.set_xlabel("Predicted", fontsize=LABEL_FONTSIZE, labelpad=8)
         ax.set_ylabel("Actual",    fontsize=LABEL_FONTSIZE, labelpad=8)
         ax.set_title(
-            f"{entry['model_name']} (threshold = {entry['threshold']})",
+            entry["model_name"],
             fontsize=TITLE_FONTSIZE, fontweight="bold", pad=10,
+        )
+        # Row letter — floats to the left of the subplot title
+        ax.text(
+            -0.18, 1.04,
+            f"{letters[idx]})",
+            transform=ax.transAxes,
+            fontsize=TITLE_FONTSIZE,
+            fontweight="bold",
+            va="top",
+            ha="left",
         )
 
     fig.suptitle(title, fontsize=SUPTITLE_FONTSIZE, fontweight="bold")

@@ -27,9 +27,10 @@ NOTE: Do NOT modify the plotter modules in utils/.
 # SETTINGS
 # =============================================================================
 
-PROJECT_DIR = "/home/diegopab/projects/ForestFire_GT/paperwriting/ForestFireGT"
-RESULTS_DIR = f"{PROJECT_DIR}/results/03_hyperparameter_tuning"
-OUTPUT_DIR  = f"{PROJECT_DIR}/results/03_hyperparameter_tuning/figures/"
+PROJECT_DIR      = "/home/diegopab/projects/ForestFire_GT/paperwriting/ForestFireGT"
+RESULTS_DIR      = f"{PROJECT_DIR}/results/03_hyperparameter_tuning"
+BASE_RESULTS_DIR = f"{PROJECT_DIR}/results/02_overundersampling"
+OUTPUT_DIR       = f"{PROJECT_DIR}/results/03_hyperparameter_tuning/figures/"
 
 # Models and their short codes — must match 03_hyperparameter_tuning.py
 MODELS = {
@@ -50,6 +51,10 @@ import json
 import sys
 import numpy as np
 import pandas as pd
+import matplotlib
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import seaborn as sns
 
 sys.path.append(os.path.join(PROJECT_DIR, "src", "utils"))
 from plot_metrics import plot_model_comparison
@@ -83,6 +88,129 @@ def load_metrics(model_short):
         return json.load(f)
 
 
+def load_base_metrics(model_short):
+    """Load step-02 metrics for the sampler variant used in the tuned run."""
+    tuned = load_metrics(model_short)
+    if tuned is None:
+        return None
+    sampler = tuned.get("sampler")
+    if not sampler:
+        return None
+    path = os.path.join(BASE_RESULTS_DIR, f"{model_short}_{sampler}", "metrics.json")
+    if not os.path.exists(path):
+        return None
+    with open(path, "r") as f:
+        return json.load(f)
+
+
+# Metrics shown in the comparison figure
+_METRICS = [
+    ("balanced_accuracy", "Balanced Accuracy",                   (0, 1)),
+    ("matthews_corrcoef", "Matthews Correlation Coefficient (MCC)", (-1, 1)),
+    ("average_precision", "Average Precision",                   (0, 1)),
+    ("roc_auc",           "ROC AUC",                             (0, 1)),
+]
+
+
+def plot_paired_comparison(tuned_list, base_list, output_dir, filename_prefix, title=None):
+    """
+    2x2 figure with grouped horizontal bars: one grey (base) + one color (tuned)
+    per model per metric.  Order within each group: base on top, tuned below.
+    """
+    sns.set_theme(style="whitegrid", context="paper", font="DejaVu Sans")
+
+    n_models   = len(tuned_list)
+    colors     = sns.color_palette("colorblind", n_colors=n_models)
+    BASE_COLOR = "#aaaaaa"
+
+    # Sort by tuned MCC descending so best model is at the top
+    order = sorted(
+        range(n_models),
+        key=lambda i: tuned_list[i].get("matthews_corrcoef") or -999,
+        reverse=True,
+    )
+    tuned_sorted  = [tuned_list[i]  for i in order]
+    base_sorted   = [base_list[i]   for i in order]
+    colors_sorted = [colors[i]      for i in order]
+
+    BAR_H   = 0.35   # height of each individual bar
+    SPACING = 0.9    # centre-to-centre distance between model groups
+
+    fig, axes = plt.subplots(2, 2, figsize=(11, 9))
+    axes_flat = axes.flatten()
+
+    for ax, (metric_key, metric_label, x_range) in zip(axes_flat, _METRICS):
+        x_span = x_range[1] - x_range[0]
+
+        for idx, (tm, bm, color) in enumerate(zip(tuned_sorted, base_sorted, colors_sorted)):
+            group_centre = idx * SPACING
+            # base bar sits above (higher y), tuned bar below
+            y_base  = group_centre + BAR_H / 2
+            y_tuned = group_centre - BAR_H / 2
+
+            v_tuned = tm.get(metric_key) or 0.0
+            v_base  = bm.get(metric_key) or 0.0 if bm else 0.0
+
+            ax.barh(y_base,  v_base,  height=BAR_H, color=BASE_COLOR, edgecolor="white", linewidth=0.5)
+            ax.barh(y_tuned, v_tuned, height=BAR_H, color=color,      edgecolor="white", linewidth=0.5)
+
+            offset = x_span * 0.015
+            for y_pos, val, missing in [
+                (y_base,  v_base,  bm is None or bm.get(metric_key) is None),
+                (y_tuned, v_tuned, tm.get(metric_key) is None),
+            ]:
+                lbl = "N/A" if missing else f"{val:.3f}"
+                ax.text(
+                    val + offset, y_pos, lbl,
+                    va="center", ha="left", fontsize=11, color="#333333",
+                )
+
+        # Y-axis: one tick per model group, labelled with model short name
+        group_centres = [i * SPACING for i in range(n_models)]
+        model_labels  = [tm["model"] for tm in tuned_sorted]
+        ax.set_yticks(group_centres)
+        ax.set_yticklabels(model_labels, fontsize=11)
+        ax.set_xlim(x_range[0], x_range[1] + x_span * 0.15)
+        ax.tick_params(axis="x", labelsize=10)
+        ax.set_title(metric_label, fontsize=11, fontweight="bold", color="#1a1a2e")
+        ax.invert_yaxis()
+
+        if metric_key == "matthews_corrcoef":
+            ax.axvline(0,   color="grey", linewidth=0.8, linestyle="--", alpha=0.6)
+        else:
+            ax.axvline(0.5, color="grey", linewidth=0.8, linestyle="--", alpha=0.4)
+
+        sns.despine(ax=ax, left=True, bottom=False)
+
+    # Legend
+    legend_handles = [mpatches.Patch(color=BASE_COLOR, label="Base (step 02)")]
+    for color, tm in zip(colors_sorted, tuned_sorted):
+        legend_handles.append(mpatches.Patch(color=color, label=f"{tm['model']} tuned"))
+
+    fig.legend(
+        handles=legend_handles,
+        loc="lower center",
+        ncol=min(n_models + 1, 5),
+        fontsize=11,
+        frameon=False,
+        bbox_to_anchor=(0.5, 0.02),
+    )
+
+    if title:
+        fig.suptitle(title, fontsize=14, fontweight="bold", y=1.01)
+
+    plt.tight_layout(rect=[0, 0.10, 1, 1])
+    fig.subplots_adjust(hspace=0.4)
+
+    os.makedirs(output_dir, exist_ok=True)
+    for fmt in ["png", "pdf", "svg"]:
+        out_path = os.path.join(output_dir, f"{filename_prefix}.{fmt}")
+        fig.savefig(out_path, format=fmt, dpi=300, bbox_inches="tight")
+        print(f"  Saved: {out_path}")
+    plt.close(fig)
+    print("Done.")
+
+
 # =============================================================================
 # MAIN
 # =============================================================================
@@ -96,24 +224,32 @@ def main():
     # -------------------------------------------------------------------------
     section("Plotting metric comparison (all tuned models)...")
 
-    metrics_list = []
+    tuned_metrics_list = []
+    base_metrics_list  = []
     for model_key, model_short in MODELS.items():
-        metrics = load_metrics(model_short)
-        if metrics is None:
-            print(f"  WARNING: metrics_*.json not found for '{model_short}' — skipping.")
+        tuned = load_metrics(model_short)
+        if tuned is None:
+            print(f"  WARNING: metrics.json not found for tuned '{model_short}' — skipping.")
             continue
-        # Use short name as label so bars are clearly identified in the figure
-        metrics["model"] = f"{model_short}_tuned"
-        metrics_list.append(metrics)
-        print(f"  Loaded metrics for: {model_short}")
+        tuned["model"] = model_short
+        tuned_metrics_list.append(tuned)
 
-    if not metrics_list:
+        base = load_base_metrics(model_short)
+        if base is None:
+            print(f"  WARNING: base metrics not found for '{model_short}' — base bar will be zero.")
+        base_metrics_list.append(base)
+
+        sampler = tuned.get("sampler", "?")
+        print(f"  Loaded tuned + base ({model_short}_{sampler}) for: {model_short}")
+
+    if not tuned_metrics_list:
         print("ERROR: No metrics loaded. Check RESULTS_DIR and model short names.")
         sys.exit(1)
 
-    print(f"\n  Plotting comparison for {len(metrics_list)} model(s)...")
-    plot_model_comparison(
-        metrics_list=metrics_list,
+    print(f"\n  Plotting paired comparison for {len(tuned_metrics_list)} model(s)...")
+    plot_paired_comparison(
+        tuned_list=tuned_metrics_list,
+        base_list=base_metrics_list,
         output_dir=OUTPUT_DIR,
         filename_prefix=FILENAME_PREFIX,
         title=PLOT_TITLE,

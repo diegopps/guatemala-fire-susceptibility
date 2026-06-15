@@ -1,4 +1,4 @@
-
+PROJECT_DIR="/home/diegopab/projects/ForestFire_GT/paperwriting/ForestFireGT"
 SCRIPT="$PROJECT_DIR/src/03_future_classification/01_plot_future_classification.py"
 PYTHON="python"
 

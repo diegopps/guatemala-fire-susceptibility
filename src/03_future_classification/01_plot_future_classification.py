@@ -38,7 +38,7 @@ PROJECT_DIR     = "/home/diegopab/projects/ForestFire_GT/paperwriting/ForestFire
 # Predictions written by 01_future_classification.py:
 PREDICTIONS_DIR = f"{PROJECT_DIR}/data/classified_future"
 THRESHOLDS_DIR  = f"{PROJECT_DIR}/results/04_final_model_training"
-OUTPUT_DIR      = f"{PROJECT_DIR}/results/03_future_classification"
+OUTPUT_DIR      = f"{PROJECT_DIR}/results/07_future_classification"
 
 # Models — order determines row order in Figure 1
 MODELS = {
@@ -232,7 +232,7 @@ def render_spatial_figure(model_key, model_short, period_cells, breaks, mode):
     base_cls = classify(period_cells["baseline"], breaks)
 
     fig = plt.figure(figsize=(13, 13))
-    gs  = fig.add_gridspec(3, 3, wspace=0.08, hspace=0.10)
+    gs  = fig.add_gridspec(3, 3, wspace=0.25, hspace=0.10)
 
     # --- Baseline map: single, centered on the left (middle row) ---
     ax_base = fig.add_subplot(gs[1, 0])
