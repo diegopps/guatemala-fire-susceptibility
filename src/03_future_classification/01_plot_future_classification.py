@@ -2,8 +2,15 @@
 01_plot_future_classification.py
 --------------------------------
 Summarizes the future fire-risk projections (step 01_future_classification) into
-publication figures, applying the FROZEN risk thresholds (step 05) so present and
-future maps are directly comparable.
+publication figures, applying the FROZEN area-quintile risk thresholds (step 05,
+Verde & Zêzere, 2010) so present and future maps are directly comparable.
+
+IMPORTANT — threshold handling:
+    Breaks are loaded ONCE from the frozen baseline file
+    (results/04_final_model_training/<MODEL_SHORT>/risk_thresholds.json) and
+    applied UNCHANGED to every period and scenario. Under NO circumstance should
+    quintiles be recomputed per period — that would force 20%-per-class
+    everywhere and erase the change signal that is the whole point of step 07.
 
 Two figures are produced:
 
@@ -24,10 +31,15 @@ Two figures are produced:
     5-class colors (the reference) while the Mid/End cells show Δ risk class.
 
 Aggregation: per cell, the predicted probability is averaged over the fire-season
-months across the period's years, then the frozen thresholds are applied.
+months across the period's years, then the frozen quintile thresholds are applied.
 
 Usage:
     python 01_plot_future_classification.py
+
+Reference:
+    Verde, A., & Zêzere, J. L. (2010). Assessment and validation of wildfire
+    susceptibility and hazard in Portugal. Natural Hazards and Earth System
+    Sciences, 10(3), 485–497. https://doi.org/10.5194/nhess-10-485-2010
 """
 
 # =============================================================================

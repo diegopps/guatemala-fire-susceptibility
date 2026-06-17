@@ -131,22 +131,25 @@ The plot script (`04_plot_topk_finalmodel.py`) also performs **top-k coverage an
 **Script:** `05_compute_risk_thresholds.py`
 **SLURM:** `sbatch_05_compute_risk_thresholds.sh`
 
-Computes **frozen** 5-class fire-risk thresholds per model from the **prediction-rate curve** (Chung & Fabbri, 2003) — replacing Jenks, which was distorted by the per-model probability scale that over/under-sampling induces. Cells are ranked by predicted susceptibility and class boundaries are placed where the ranked cells cumulatively capture target fractions of observed fires (50/75/90/99%). Derived from **held-out data (test + validation)**, never training (which is in-sample and biases the thresholds — markedly for XGBoost). Saves `risk_thresholds.json` (ascending probability `breaks` + per-class area/capture summary + prediction-rate AUC) per model under `results/04_final_model_training/<MODEL_SHORT>/`. Skips if the file exists.
+Computes **frozen** 5-class fire-risk thresholds per model using the **area-quintile method** (Verde & Zêzere, 2010) — replacing Jenks, which was distorted by the per-model probability scale that over/under-sampling induces. The four break-points are the 20th, 40th, 60th, and 80th percentiles of the predicted-probability distribution, placing ~20% of cells in each class by construction. Because only the ranking of cells enters, the breaks are invariant to monotonic rescaling of the scores. Derived from **held-out data (test + validation)**, never training (which is in-sample and biases the thresholds — markedly for XGBoost). The reference quantity is the per-cell mean predicted probability over the dry fire season. Saves `risk_thresholds.json` (ascending probability `breaks` + per-class area/capture summary + prediction-rate curve data + AUC) per model under `results/04_final_model_training/<MODEL_SHORT>/`. Skips if the file exists.
+
+The prediction-rate curve (cumulative fire capture vs cumulative area, ranked by descending susceptibility) is stored alongside the breaks as a diagnostic and plotted in step 06 to visually justify the quintile choice and report per-class fire capture.
 
 Because these are fixed probability cutoffs, the same standard applies to every map — present and future — so risk-class areas can grow/shrink between scenarios.
 
 ### Step 06 — Risk Map Plotting
 **Script:** `06_plot_risk_maps.py`
 
-Applies the frozen risk thresholds from step 05 to predicted probabilities and produces fire risk classification maps for Guatemala. Each 1km grid cell is rendered as an exact pixel using `pcolormesh()` on a reconstructed 2D raster — no interpolation. Administrative boundaries are the Natural Earth admin-1 layer (auto-downloaded once to `data/boundaries/`).
+Applies the frozen area-quintile thresholds (Verde & Zêzere, 2010) from step 05 to predicted probabilities and produces fire risk classification maps for Guatemala. Each 1km grid cell is rendered as an exact pixel using `pcolormesh()` on a reconstructed 2D raster — no interpolation. Administrative boundaries are the Natural Earth admin-1 layer (auto-downloaded once to `data/boundaries/`).
 
-**Data:** maps are built from **all subsets combined** (train + test + val) for complete spatial coverage and each cell's full month history. This is a visualization of the model's risk surface — quantitative performance is reported separately on held-out data (steps 02–04), and the risk classes come from the frozen thresholds fit on held-out data (step 05), so the classification is not biased by in-sample training probabilities.
+**Data (maps):** maps are built from **all subsets combined** (train + test + val) for complete spatial coverage and each cell's full month history. This is a visualization of the model's risk surface — quantitative performance is reported separately on held-out data (steps 02–04), and the risk classes come from the frozen thresholds fit on held-out data (step 05), so the classification is not biased by in-sample training probabilities.
 
-**Aggregation:** for each cell the predicted probability is averaged over the relevant months (across all years), then the frozen thresholds are applied to that **mean probability**. Probabilities are averaged rather than class labels, since the classes are unequal-width bins. The same fixed thresholds are used for every map, so seasons/months are directly comparable.
+**Aggregation:** for each cell the predicted probability is averaged over the relevant months (across all years), then the frozen thresholds are applied to that **mean probability**. Probabilities are averaged rather than class labels, since the classes are equal-area quintile bins. The same fixed thresholds are used for every map, so seasons/months are directly comparable.
 
-Produces two figure types:
+Produces three figure types:
 - **Fire-season comparison** (main text): one figure with a panel per model (RF, XGB, XT), each showing the dry-season (Nov–Apr — the official fire season) risk climatology. Panels are lettered A), B), C) for cross-referencing. → `results/06_risk_maps/fire_season_comparison.{png,pdf,svg}`
 - **Monthly climatology** (appendix): one 3×4 panel figure per model, with the 12 calendar-month climatologies. → `results/06_risk_maps/<MODEL_SHORT>/<MODEL_SHORT>_monthly_climatology.{…}`
+- **Prediction-rate curve panel** (methods / diagnostic): a 3-row panel figure (one per model) showing cumulative fraction of fires captured vs cumulative fraction of area (ranked by descending susceptibility), computed on held-out (test+val) data. The four quintile break positions are overlaid as vertical dashed lines, each annotated with the class's fire-capture %, visually justifying the smooth-curve → quintile choice. → `results/06_risk_maps/prediction_rate_curves.{png,pdf,svg}`
 
 *(Observed fires per month — used to justify the fire-season window — are reported separately as a table.)*
 
@@ -157,7 +160,7 @@ Produces two figure types:
 
 Applies each saved final model to preprocessed future climate (`data/indata/data_fullfuture_processed/`) for the historical period (1961–2014) and three SSP scenarios (SSP1-2.6, SSP3-7.0, SSP5-8.5) through 2100, writing monthly per-cell probabilities to `data/classified_future/<MODEL>/<scenario>/`. No classification here — only `predict_proba` (kept fast and compact).
 
-The plot script applies the **frozen risk thresholds** (step 05) and writes two figures to `results/07_future_classification/`:
+The plot script applies the **frozen area-quintile thresholds** (step 05, Verde & Zêzere, 2010) and writes two figures to `results/07_future_classification/`. Breaks are loaded once from the frozen baseline file and applied unchanged to every period and scenario — quintiles are never recomputed per period, as that would force 20%-per-class everywhere and erase the change signal:
 - **Temporal trend** (results): `fig1_trend.*` — 3 rows (one per model, lettered A/B/C), % of national area in the High+Very-High classes vs year (1961–2100); historical + 3 SSP lines, 10-year rolling mean.
 - **Spatial change** (results / appendix), per model in two versions: `fig2_<MODEL>_normal.*` (absolute fire-season classes) and `fig2_<MODEL>_change.*` (Δ risk class vs the 1991–2014 baseline). Layout: a centered baseline map + a 3×2 grid (rows = SSP scenarios with vertical labels; columns = Mid-century 2041–2060, End-century 2081–2100).
 
@@ -181,7 +184,7 @@ Caveat (stated in the paper): static predictors are held constant over time, and
 | `plot_featimportance_panel.py` | `plot_feature_importance_panel()` | Feature importances arranged in a multi-panel figure |
 | `plot_mcc_heatmap.py` | `plot_mcc_heatmap()` | Heatmap of MCC across models × samplers |
 | `plot_topk.py` | `plot_topk_coverage()` | Top-k coverage bar charts, one figure per k level |
-| `risk_thresholds.py` | `compute_risk_thresholds()`, `apply_thresholds()`, `save_thresholds()`, `load_thresholds()` | Frozen prediction-rate fire-risk thresholds (replaces Jenks) |
+| `risk_thresholds.py` | `compute_quintile_thresholds()`, `apply_thresholds()`, `save_thresholds()`, `load_thresholds()` | Frozen area-quintile fire-risk thresholds (Verde & Zêzere, 2010); prediction-rate curve stored as diagnostic |
 | `plot_risk_map.py` | `plot_risk_map()`, `plot_risk_map_grid()`, `make_delta_cmap()` | Spatial fire risk maps for Guatemala (single map, multi-panel grid, Δ-class diverging colormap) |
 
 All plots saved as PNG + PDF + SVG at 300 DPI. Style: seaborn `whitegrid`, publication-ready.
@@ -196,7 +199,7 @@ All plots saved as PNG + PDF + SVG at 300 DPI. Style: seaborn `whitegrid`, publi
 - **Primary metric:** Matthews Correlation Coefficient (MCC), reported at each model's MCC-optimal threshold. Model and sampler *selection* uses the threshold-independent ROC AUC and average precision, since peak MCC is too flat to discriminate options at this imbalance.
 - **Threshold handling:** No fixed threshold. Each run is reported at the threshold that maximizes its MCC (the peak of its MCC-vs-threshold curve), selected via `utils/threshold_selection.py` and stored inside the metrics JSON under `"threshold"`. Threshold-sensitive outputs use fixed filenames (`metrics.json`, `confusion_matrix.csv`; with a `_<subset>` suffix in step 04). PR/ROC curves and feature importance are threshold-independent and saved once per run.
 - **Validation set:** Held out entirely until step 04 — never used for model selection or threshold tuning.
-- **Risk classification:** Frozen 5-class thresholds from the prediction-rate curve (step 05), derived from held-out data and applied unchanged to all subsets, the present-day maps, and the future scenarios — so risk classes stay comparable across time. (Replaced Jenks, which was distorted by the per-model probability scale.)
+- **Risk classification:** Frozen 5-class area-quintile thresholds (Verde & Zêzere, 2010; step 05) — break-points are the 20/40/60/80th percentiles of per-cell mean susceptibility on held-out (test+val) dry-season data, placing ~20% of cells in each class. Derived from held-out data and applied unchanged to all subsets, the present-day maps, and the future scenarios — so risk classes stay comparable across time. The prediction-rate curve is retained as a diagnostic and plotted in step 06 to report per-class fire capture and justify the smooth-curve → quintile choice. (Replaced Jenks, which was distorted by the per-model probability scale.)
 - **Random seed:** `42` throughout (except `00_split_data.py` which uses `107`).
 
 ---
@@ -211,7 +214,7 @@ This avoids comparing models at a single shared cut, which would conflate model 
 
 ## Risk Classification
 
-Five risk classes based on the frozen prediction-rate thresholds (step 05) applied to predicted probabilities:
+Five risk classes based on the frozen area-quintile thresholds (step 05, Verde & Zêzere, 2010) applied to predicted probabilities. Break-points are the 20/40/60/80th percentiles of per-cell mean susceptibility on held-out dry-season data, so each class covers ~20% of area on the reference baseline. Class areas depart from 20% in future scenarios, which is the basis for detecting temporal change.
 
 | Class | Label |
 |---|---|
