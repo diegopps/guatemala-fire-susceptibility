@@ -21,12 +21,8 @@ Grid and cells (utils/chelsa_grid.py)
   undefined. Aspect enters as sine and cosine components (static_files.aspect_sincos),
   sampled at each cell centre by nearest neighbour.
 
-Derived variables
-  Potential evapotranspiration (mm month-1), Priestley–Taylor:
-      PET = alpha * Delta / (Delta + gamma) * Rn / lambda * days
-      Delta = 4098 * e_s(T) / (T + 237.3)^2,  e_s(T) = 0.6108 * exp(17.27 T / (T + 237.3))
-  with T = tas in degC, alpha = 1.26, gamma = 0.066 kPa degC-1, lambda = 2.45 MJ kg-1 and
-  Rn = (1 - 0.23) * rsds, converted from W m-2 to MJ m-2 day-1.
+Derived variables (formulas in utils/climate_derived.py)
+  Potential evapotranspiration PET (mm month-1), Priestley–Taylor.
   Climatic water balance (mm month-1): climbal = P - PET, with P = pr converted from
   kg m-2 s-1 to mm month-1, using the real number of days in each month.
 
@@ -37,13 +33,13 @@ Output columns
   Units: tas/tasmax/tasmin K; pr kg m-2 s-1; rsds W m-2; PET and climbal mm month-1;
   distances m; elev m; slope degrees; aspect components dimensionless.
 
-Output: paths.inputs.training_set (Parquet, one row group per GCM and year)
+Output: paths.inputs.training_set (Parquet, written per GCM and year; pyarrow splits each
+        GCM-year into row groups of at most 1,048,576 rows)
 
 Usage:
     python 01_build_training_set.py
 """
 
-import calendar
 import sys
 from pathlib import Path
 
@@ -56,32 +52,11 @@ from scipy.interpolate import RegularGridInterpolator
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "utils"))
 from load_config import cfg
-from chelsa_grid import Grid, load_static_layers
+from chelsa_grid import Grid, load_static_layers, monthly_climate_file as climate_file
+from climate_derived import month_lengths, pet_priestley_taylor, climatic_water_balance
 
 CLIMATE_VARS = cfg.gcms.climate_vars
 COLUMNS = cfg.data.id_columns + [cfg.data.target] + cfg.data.features
-
-# Priestley–Taylor constants
-ALPHA = 1.26            # Priestley–Taylor coefficient
-GAMMA = 0.066           # psychrometric constant, kPa degC-1
-LAMBDA = 2.45           # latent heat of vaporisation, MJ kg-1
-ALBEDO = 0.23
-W_M2_TO_MJ_DAY = 0.0864
-SECONDS_PER_DAY = 86400
-
-
-# =============================================================================
-# HELPERS
-# =============================================================================
-
-def climate_file(gcm, var, scenario, year):
-    return cfg.paths.generated.climate_monthly_gcm / cfg.files.climate_monthly_gcm.format(
-        gcm=gcm, var=var, scenario=scenario, year=year)
-
-
-def month_lengths(year):
-    """Days in each month of the year (index 0 = January)."""
-    return np.array([calendar.monthrange(year, m)[1] for m in range(1, 13)])
 
 
 # =============================================================================
@@ -132,12 +107,8 @@ def load_climate(grid, cells, gcm, year, scenario):
 def add_pet_and_water_balance(df, year):
     """Adds PET and climbal (mm month-1) in place."""
     days = month_lengths(year)[df.month.to_numpy() - 1]
-    t = df.tas.to_numpy() - 273.15
-    e_s = 0.6108 * np.exp(17.27 * t / (t + 237.3))
-    delta = 4098 * e_s / (t + 237.3) ** 2
-    rn = (1 - ALBEDO) * df.rsds.to_numpy() * W_M2_TO_MJ_DAY
-    df["PET"] = ALPHA * delta / (delta + GAMMA) * rn / LAMBDA * days
-    df["climbal"] = df.pr.to_numpy() * SECONDS_PER_DAY * days - df.PET
+    df["PET"] = pet_priestley_taylor(df.tas.to_numpy(), df.rsds.to_numpy(), days)
+    df["climbal"] = climatic_water_balance(df.pr.to_numpy(), df.PET.to_numpy(), days)
 
 
 def load_fires(grid):

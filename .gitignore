@@ -5,5 +5,4 @@ data
 logs/
 
 # Pycache
-src/00_preprocessing/__pycache__/
-src/utils/__pycache__/
+__pycache__/

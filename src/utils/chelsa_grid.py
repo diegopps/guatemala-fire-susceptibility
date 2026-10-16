@@ -4,6 +4,10 @@ chelsa_grid.py
 The analysis grid (CHELSA, 30 arc-seconds) and the set of cells used throughout the
 pipeline.
 
+monthly_climate_file(gcm, var, scenario, year)
+    Path of a monthly per-GCM climate file (paths.generated.climate_monthly_gcm).
+reference_grid()
+    The grid of the monthly climate files.
 Grid(nc_path)
     Cell lookup on the grid of a climate NetCDF; cell centres are its coordinates.
 load_static_layers(grid)
@@ -20,6 +24,18 @@ from load_config import cfg
 
 # Static files that are not 30'' layers and do not define the cell set
 NOT_MASK_LAYERS = {"aspect_sincos"}
+
+
+def monthly_climate_file(gcm, var, scenario, year):
+    """Path of the monthly climate of one GCM, variable, scenario and year."""
+    return cfg.paths.generated.climate_monthly_gcm / cfg.files.climate_monthly_gcm.format(
+        gcm=gcm, var=var, scenario=scenario, year=year)
+
+
+def reference_grid():
+    """Grid of the monthly climate files (all share it)."""
+    return Grid(monthly_climate_file(cfg.gcms.models[0], cfg.gcms.climate_vars[0],
+                                     cfg.training.climate_scenario, cfg.training.years[0]))
 
 
 class Grid:
