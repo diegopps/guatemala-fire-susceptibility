@@ -1,0 +1,30 @@
+# Conda environment for the whole ForestFireGT pipeline.
+# Versions are those the paper's results were produced with.
+#
+#   conda env create -f environment.yml
+#   source activate forestFireGT      # or: conda activate forestFireGT
+#
+# xgboost is pinned by version only: conda picks a CPU or CUDA build to suit the
+# machine. All models run on CPU.
+name: forestFireGT
+channels:
+  - conda-forge
+dependencies:
+  - python=3.13.2
+  # data handling (netcdf4 is the backend xarray uses for the NetCDF files)
+  - numpy=2.2.3
+  - pandas=2.2.3
+  - pyarrow=25.0.0
+  - xarray=2025.3.0
+  - netcdf4=1.7.2
+  - scipy=1.16.0
+  # models and resampling
+  - scikit-learn=1.7.1
+  - xgboost=3.0.4
+  - imbalanced-learn=0.14.0
+  - joblib=1.5.1
+  # figures and maps
+  - matplotlib=3.10.5
+  - seaborn=0.13.2
+  - geopandas=1.1.1
+  - cartopy=0.25.0
