@@ -11,6 +11,9 @@ Output  paths.generated.climate_monthly_gcm   files.climate_monthly_gcm
   (pr stays a mean flux in kg m-2 s-1).
 - Values are stored as float32. Cells outside the pipeline's cell set (Guatemala's
   land cells, see utils/chelsa_grid.py) are set to missing.
+- A month may lack at most one day (the raw data miss 1 January in three GCM-years);
+  the missing day is simply left out of that month's mean. It is reported as a warning
+  and in a "missing_days" file attribute. Larger gaps stop the script.
 - Existing output files are skipped, so an interrupted run can be restarted.
 
 By default all years of the scenario are processed: periods.historical for
@@ -24,17 +27,21 @@ Examples:
     python 00_aggregate_monthly_gcm.py IPSL-CM6A-LR ssp370 2017 2024
 """
 
-import calendar
 import glob
 import sys
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "utils"))
 from load_config import cfg
 from chelsa_grid import Grid, load_static_layers
+
+# A month may lack at most this many days; missing days are left out of the monthly mean
+# (the gap is printed and stored in the file attribute "missing_days").
+MAX_MISSING_DAYS_PER_MONTH = 1
 
 ENCODING = {"dtype": "float32", "zlib": True, "complevel": 4, "_FillValue": np.float32(np.nan)}
 
@@ -61,16 +68,31 @@ def cell_mask(grid):
     return mask
 
 
+def missing_days(times, year):
+    """
+    Dates of `year` absent from `times`, as ISO strings. Raises if a date is duplicated
+    or outside the year, or if any month lacks more than MAX_MISSING_DAYS_PER_MONTH days.
+    """
+    days = pd.to_datetime(times).normalize()
+    if days.duplicated().any() or (days.year != year).any():
+        raise ValueError(f"Time axis has duplicated dates or dates outside {year}.")
+    missing = pd.date_range(f"{year}-01-01", f"{year}-12-31", freq="D").difference(days)
+    per_month = missing.month.value_counts()
+    if (per_month > MAX_MISSING_DAYS_PER_MONTH).any():
+        raise ValueError(f"Too many missing days in {year}: {per_month.to_dict()} (month: days).")
+    return [d.strftime("%Y-%m-%d") for d in missing]
+
+
 def aggregate(src, dst, var, year, grid, mask):
     with xr.open_dataset(src) as ds:
         if not grid.matches(ds.lat.values, ds.lon.values):
             raise ValueError(f"{src.name}: grid differs from the reference grid.")
         da = ds[var]
+        missing = missing_days(da.time.values, year)
+        if missing:
+            print(f"    WARNING {src.name}: missing day(s) {', '.join(missing)}; "
+                  f"left out of the monthly mean")
         months = da.time.dt.month
-        expected = np.array([calendar.monthrange(year, m)[1] for m in range(1, 13)])
-        counts = np.bincount(months.values, minlength=13)[1:]
-        if not np.array_equal(counts, expected):
-            raise ValueError(f"{src.name}: days per month {counts.tolist()} != {expected.tolist()}.")
         monthly = da.groupby(months).mean("time").rename(month="time")
         monthly = monthly.where(xr.DataArray(mask, dims=("lat", "lon")))
         monthly = monthly.assign_coords(
@@ -80,6 +102,8 @@ def aggregate(src, dst, var, year, grid, mask):
         out.attrs = {**ds.attrs,
                      "aggregation": f"monthly mean of daily values ({src.name})",
                      "masking": "cells outside the pipeline cell set (Guatemala land cells) set to missing"}
+        if missing:
+            out.attrs["missing_days"] = ", ".join(missing)
         dst.parent.mkdir(parents=True, exist_ok=True)
         tmp = dst.with_suffix(".nc.tmp")
         out.to_netcdf(tmp, encoding={var: ENCODING})
