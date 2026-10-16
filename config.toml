@@ -1,0 +1,203 @@
+# ForestFireGT — project configuration.
+#
+# Loaded by src/utils/load_config.py:   from load_config import cfg
+# - Relative paths are resolved against the repository root (directories) or the
+#   directory named in their section header (files).
+# - The data directory can be overridden with the environment variable FFGT_DATA_DIR.
+# - Year periods are inclusive [first, last] and are returned as Python ranges.
+# - Settings used by a single step (e.g. the tuning search space) stay in that script.
+
+# =============================================================================
+# PATHS
+# =============================================================================
+
+[paths]
+data_dir    = "data"      # symlink to project storage
+results_dir = "results"
+models_dir  = "models"
+
+[paths.raw]               # relative to data_dir — raw inputs of src/00_preprocessing
+fire_records     = "rawdata/histfires/histfires_1kmGT_2017-2024.csv"   # fire cell-months (lat, lon, year, month, n_reports, on_grid)
+climate_ensemble = "rawdata/chelsaGT_raw/ensemble_averaged"           # monthly 9-GCM ensemble means (reference only; the pipeline uses per-GCM data)
+climate_gcms     = "rawdata/chelsaGT_raw/menz_output"                 # daily per-GCM data (CHELSA ISIMIP3b BA), see [files]
+static_vars      = "rawdata/static_vars"                              # static layers, see [preprocessing.static_files]
+
+[paths.inputs]            # relative to data_dir — model inputs built by src/00_preprocessing
+training_set  = "indata/training/allvars_2017-2024.parquet"  # built by 01_build_training_set.py
+future_inputs = "indata/data_fullfuture_processed"  # <scenario>/ subfolders, see [files]
+boundaries    = "boundaries_shp"                    # Natural Earth admin-1 (auto-downloaded)
+
+[paths.generated]         # relative to data_dir — large pipeline outputs kept on project storage
+climate_monthly_gcm = "rawdata/processed/climate_monthly_gcm"  # monthly means per GCM, all scenarios/years, built by 00_aggregate_monthly_gcm.py
+split_index        = "processed/split_index.csv"
+future_predictions = "classified_future"            # <MODEL>/<scenario>/ subfolders, see [files]
+
+[paths.results]           # relative to results_dir — one folder per pipeline step
+data_exploration      = "00_data_exploration"
+model_testing         = "01_model_testing"
+overundersampling     = "02_overundersampling"
+hyperparameter_tuning = "03_hyperparameter_tuning"
+final_model_training  = "04_final_model_training"   # also holds risk_thresholds.json per model
+risk_maps             = "06_risk_maps"
+future_classification = "07_future_classification"
+
+[files]                   # filename patterns ({gcm}, {var}, {scenario}, {year})
+climate_monthly     = "{var}/{scenario}/chelsaGT_monthly_{var}_{scenario}_{year}_ens.nc"         # under paths.raw.climate_ensemble
+climate_daily_gcm   = "{gcm}/{scenario}/*/{var}/{var}_CHELSA_ISIMIP3b_BA_{gcm}_*_{scenario}_day_{year}0101-{year}1231.nc"  # glob, under paths.raw.climate_gcms
+climate_monthly_gcm = "{gcm}/{var}/{scenario}/chelsaGT_monthly_{var}_{scenario}_{year}_{gcm}.nc"  # under paths.generated.climate_monthly_gcm
+future_input      = "fullvarset_{scenario}_{year}.csv"
+future_prediction = "{scenario}_{year}_predictions.csv"
+
+# =============================================================================
+# DATA
+# =============================================================================
+
+[data]
+target   = "fire"
+# Training-set columns that are identifiers, never predictors: lat, lon, month, year,
+# cell_id (grid-cell index, for spatial CV grouping and joins) and gcm.
+id_columns = ["lat", "lon", "month", "year", "cell_id", "gcm"]
+features = [
+    "PET", "climbal", "pr", "rsds",
+    "tas", "tasmax", "tasmin",
+    "aspect_sin", "aspect_cos",
+    "distRoads", "distUrban", "distWater",
+    "elev", "slope",
+]
+
+[training]
+years            = [2017, 2018, 2019, 2020, 2021, 2022, 2024]   # 2023 excluded: no fire records
+climate_scenario = "ssp370"       # scenario whose climate represents the training years
+
+[preprocessing.static_files]      # under paths.raw.static_vars; key = column in the file
+# A cell is kept only if every 30'' layer has a value; aspect is undefined on water
+# surfaces, which are thereby excluded.
+elev          = "elev_1kmGT.csv"
+slope         = "slope_1kmGT.csv"
+aspect        = "aspect_1kmGT.csv"           # degrees; only used for the cell mask
+distRoads     = "distRoads_1kmGT.csv"
+distUrban     = "distUrban_1kmGT.csv"
+distWater     = "distWater_1kmGT.csv"
+aspect_sincos = "aspect_sincos_1km.csv"      # aspect_sin, aspect_cos (the predictors), derived from aspect_1km.csv;
+                                             # 1/112° grid, sampled at the cell centres by nearest neighbour
+
+[fire_season]
+months = [11, 12, 1, 2, 3, 4]     # Nov–Apr
+
+[periods]                         # inclusive [first, last]
+historical  = [1961, 2014]
+future      = [2015, 2100]
+baseline    = [1991, 2014]
+mid_century = [2041, 2060]
+end_century = [2081, 2100]
+
+[gcms]                            # CHELSA-downscaled ISIMIP3b GCMs: pooled in training, predicted separately
+models = ["CanESM5", "CNRM-CM6-1", "CNRM-ESM2-1", "EC-Earth3", "IPSL-CM6A-LR",
+          "MIROC6", "MPI-ESM1-2-HR", "MRI-ESM2-0", "UKESM1-0-LL"]
+climate_vars = ["pr", "rsds", "tas", "tasmax", "tasmin"]
+
+[scenarios]
+historical = "historical"
+ssp        = ["ssp126", "ssp370", "ssp585"]
+
+[scenarios.labels]
+historical = "Historical"
+ssp126     = "SSP1-2.6"
+ssp370     = "SSP3-7.0"
+ssp585     = "SSP5-8.5"
+
+# =============================================================================
+# SPLIT AND SEEDS
+# =============================================================================
+
+[split]
+train    = 0.65
+test     = 0.25
+validation = 0.10
+seed     = 107
+
+[seeds]
+search = 42                       # RandomizedSearchCV; model/sampler seeds are in their params
+
+# =============================================================================
+# MODELS (the three selected models; step-01 exploration models stay in 01_model_testing.py)
+# =============================================================================
+# params are the base hyperparameters used in steps 02 and 04 (and the base of step 03,
+# which overrides n_jobs = 1 because it parallelises at the search level).
+
+[models.random_forest]
+short   = "RF"
+display = "Random Forest"
+class   = "sklearn.ensemble.RandomForestClassifier"
+sampler = "rus"                   # best sampler from step 02
+params  = { n_estimators = 100, random_state = 42, n_jobs = -1 }
+
+[models.xgboost]
+short   = "XGB"
+display = "XGBoost"
+class   = "xgboost.XGBClassifier"
+sampler = "ncl"
+params  = { n_estimators = 100, use_label_encoder = false, eval_metric = "logloss", random_state = 42, n_jobs = -1 }
+
+[models.extra_trees]
+short   = "XT"
+display = "Extra Trees"
+class   = "sklearn.ensemble.ExtraTreesClassifier"
+sampler = "rus"
+params  = { n_estimators = 100, random_state = 42, n_jobs = -1 }
+
+# =============================================================================
+# SAMPLERS (step 02 compares all; steps 03–04 use each model's `sampler`)
+# =============================================================================
+
+[samplers.ros]
+short  = "ros"
+class  = "imblearn.over_sampling.RandomOverSampler"
+params = { random_state = 42 }
+
+[samplers.smote]
+short  = "smote"
+class  = "imblearn.over_sampling.SMOTE"
+params = { random_state = 42 }
+
+[samplers.svmsmote]
+short  = "svms"
+class  = "imblearn.over_sampling.SVMSMOTE"
+params = { random_state = 42 }
+
+[samplers.adasyn]
+short  = "adsn"
+class  = "imblearn.over_sampling.ADASYN"
+params = { random_state = 42 }
+
+[samplers.rus]
+short  = "rus"
+class  = "imblearn.under_sampling.RandomUnderSampler"
+params = { random_state = 42 }
+
+[samplers.nearmiss]
+short  = "nm"
+class  = "imblearn.under_sampling.NearMiss"
+params = { n_jobs = -1 }
+
+[samplers.tomek]
+short  = "tomk"
+class  = "imblearn.under_sampling.TomekLinks"
+params = { n_jobs = -1 }
+
+[samplers.ncl]
+short  = "ncl"
+class  = "imblearn.under_sampling.NeighbourhoodCleaningRule"
+params = { n_jobs = -1 }
+
+# =============================================================================
+# THRESHOLDS AND RISK CLASSES
+# =============================================================================
+
+[model_exploration]
+thresholds = [0.01, 0.03, 0.05, 0.08, 0.1, 0.2, 0.3, 0.4, 0.5]
+
+[risk_classes]
+quintiles  = [20, 40, 60, 80]
+labels     = ["Very low", "Low", "Medium", "High", "Very high"]  # classes 1..5
+high_risk  = [4, 5]               # counted in the future trend (High + Very high)
