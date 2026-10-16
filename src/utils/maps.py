@@ -6,7 +6,7 @@ WGS 84 lat/lon), with an aspect ratio that keeps distances true at Guatemala's l
 Boundaries: Natural Earth 10m admin-1 (paths.inputs.boundaries, files.boundaries).
 
 cells_to_raster(grid, cell_id, values)   2-D array on the grid (NaN outside the cells)
-draw_raster(ax, grid, raster, **kw)      the grid cells, rasterized in the PDF
+draw_raster(ax, grid, raster, **kw)      the grid cells, one image pixel per cell
 setup_map(ax, left=True, bottom=True)    extent, aspect, coordinate ticks (15° N, 90° W)
 draw_boundaries(ax, departments=True)    Guatemala, its departments and neighbouring countries
 add_scale_bar(ax, length_km, x, y)       scale bar at axes position (x, y)
@@ -44,9 +44,15 @@ def cells_to_raster(grid, cell_id, values):
 
 
 def draw_raster(ax, grid, raster, **kwargs):
-    """Grid cells as a mesh, rasterized at figures.dpi when saved as PDF."""
-    return ax.pcolormesh(grid.lon, grid.lat, raster, shading="nearest", rasterized=True,
-                         linewidth=0, **kwargs)
+    """Grid cells as an image with one pixel per cell, embedded unresampled in the PDF so
+    the cells keep their shape at any zoom."""
+    dlon = abs(grid.lon[1] - grid.lon[0])
+    dlat = abs(grid.lat[1] - grid.lat[0])
+    extent = (grid.lon.min() - dlon / 2, grid.lon.max() + dlon / 2,
+              grid.lat.min() - dlat / 2, grid.lat.max() + dlat / 2)
+    origin = "upper" if grid.lat[0] > grid.lat[-1] else "lower"
+    return ax.imshow(raster, extent=extent, origin=origin, interpolation="none",
+                     aspect="auto", **kwargs)
 
 
 # =============================================================================

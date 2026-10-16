@@ -65,10 +65,11 @@ def plot(corr):
     values = np.where(lower, corr.loc[ORDER, ORDER].to_numpy(), np.nan)[1:, :-1]
 
     fig, ax = plt.subplots(figsize=(cm(14), cm(12)))
-    im = ax.imshow(values, cmap="RdBu_r", vmin=-1, vmax=1)
+    im = ax.imshow(values, cmap="RdBu_r", vmin=-1, vmax=1, interpolation="none")
     for (r, c), v in np.ndenumerate(values):
         if np.isfinite(v):
-            ax.text(c, r, f"{v:.2f}".replace("-", "−"), ha="center", va="center",
+            text = f"{round(v, 2) + 0.0:.2f}".replace("-", "−")   # + 0.0: no "-0.00"
+            ax.text(c, r, text, ha="center", va="center",
                     fontsize=cfg.figures.font_size - 1.5,
                     color="white" if abs(v) > 0.6 else "black")
     ax.set_xticks(range(n - 1), names[:-1], rotation=45, ha="right", rotation_mode="anchor")

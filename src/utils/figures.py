@@ -10,9 +10,9 @@ no titles inside the figure (captions are in the manuscript).
 setup_style()                   rcParams for figures drawn at print size
 VARIABLES                       publication name and unit of every predictor, in display order
 CLIMATE_VARIABLES, STATIC_VARIABLES   the two predictor groups, in display order
-label(var)                      axis or colour-bar label, e.g. "Mean temperature (°C)"
+label(var, wrap=False)          axis or colour-bar label, e.g. "Mean temperature (°C)"
 to_display_units(var, values, days)   predictor units -> display units
-SCENARIOS                       label and colour of the climate scenarios (IPCC AR6 colours)
+SCENARIOS                       label and colour of the climate scenarios (Okabe–Ito colours)
 lighten(color, amount)          colour mixed with white
 cm(x)                           centimetres -> inches
 add_panel_label(ax, i)          "(a)", "(b)", ... at the top left of an axes
@@ -49,18 +49,23 @@ VARIABLES = {
 CLIMATE_VARIABLES = ["tas", "tasmax", "tasmin", "pr", "PET", "climbal", "rsds"]
 STATIC_VARIABLES = [v for v in VARIABLES if v not in CLIMATE_VARIABLES]
 
+# Scenario colours from the Okabe–Ito colour-blind-safe palette (Okabe and Ito, 2008;
+# Wong, 2011): bluish green, blue, vermillion; historical in dark grey.
 SCENARIOS = {
     "historical": {"label": "Historical", "color": "#4d4d4d"},
-    "ssp126":     {"label": cfg.scenarios.labels.ssp126, "color": "#173c66"},
-    "ssp370":     {"label": cfg.scenarios.labels.ssp370, "color": "#e71d25"},
-    "ssp585":     {"label": cfg.scenarios.labels.ssp585, "color": "#951b1e"},
+    "ssp126":     {"label": cfg.scenarios.labels.ssp126, "color": "#009E73"},
+    "ssp370":     {"label": cfg.scenarios.labels.ssp370, "color": "#0072B2"},
+    "ssp585":     {"label": cfg.scenarios.labels.ssp585, "color": "#D55E00"},
 }
 
 
-def label(var):
-    """Axis or colour-bar label of a predictor, e.g. 'Precipitation (mm month$^{-1}$)'."""
+def label(var, wrap=False):
+    """Axis or colour-bar label of a predictor, e.g. 'Precipitation (mm month$^{-1}$)';
+    with wrap=True the unit goes on a second line."""
     name, unit = VARIABLES[var]
-    return f"{name} ({unit})" if unit else name
+    if not unit:
+        return name
+    return f"{name}\n({unit})" if wrap else f"{name} ({unit})"
 
 
 def to_display_units(var, values, days=None):
@@ -85,6 +90,9 @@ def setup_style():
         "mathtext.rm":       FIG.font,
         "mathtext.it":       f"{FIG.font}:italic",
         "mathtext.bf":       f"{FIG.font}:bold",
+        "mathtext.cal":      FIG.font,               # unused; avoids a 'cursive' font lookup
+        "mathtext.sf":       FIG.font,
+        "mathtext.tt":       FIG.font,
         "mathtext.default":  "regular",
         "font.size":         size,
         "axes.titlesize":    size,

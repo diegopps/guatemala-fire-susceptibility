@@ -15,7 +15,9 @@ Output: results/mainfigs/01_predictor_maps.pdf            mean temperature, prec
         --recompute is given.
 
 Units: temperatures °C, precipitation, PET and climatic water balance mm month-1 (real
-month lengths), solar radiation W m-2, elevation and distances m, slope degrees.
+month lengths), solar radiation W m-2, elevation m, slope degrees. Distances are stored in
+m (as in the training set) but mapped in km on a square-root colour scale: most cells are
+within a few km of a road, town or water body, which a linear scale would hide.
 
 Usage:
     python 02_predictor_maps.py [--recompute]
@@ -30,14 +32,14 @@ import matplotlib.ticker as mticker
 import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
-from matplotlib.colors import Normalize, TwoSlopeNorm
+from matplotlib.colors import Normalize, PowerNorm, TwoSlopeNorm
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "utils"))
 from load_config import cfg
 from chelsa_grid import reference_grid
 from climate_derived import month_lengths
-from figures import (CLIMATE_VARIABLES, STATIC_VARIABLES, add_panel_label, cm, label,
-                     save_figure, setup_style, to_display_units)
+from figures import (CLIMATE_VARIABLES, STATIC_VARIABLES, VARIABLES, add_panel_label, cm,
+                     label, save_figure, setup_style, to_display_units)
 from maps import cells_to_raster, draw_boundaries, draw_raster, map_extent, setup_map
 
 MAIN_VARIABLES = ["tas", "pr", "elev", "distUrban"]
@@ -60,6 +62,10 @@ STYLE = {
     "distUrban":  ("viridis", False),
     "distWater":  ("viridis", False),
 }
+
+# Distances: mapped in km on a square-root colour scale, with these candidate ticks (km)
+DISTANCES = {"distRoads", "distUrban", "distWater"}
+DISTANCE_TICKS = [0, 1, 5, 10, 20, 40, 60, 80]
 
 # Layout (cm)
 MARGIN_LEFT, MARGIN_RIGHT, MARGIN_TOP = 1.1, 0.3, 0.45
@@ -118,8 +124,18 @@ def load_cell_means(grid, recompute):
 # PLOT
 # =============================================================================
 
+def map_values(var, means):
+    """Mapped values and colour-bar label (distances in km, see module docstring)."""
+    values = means[var].to_numpy()
+    if var in DISTANCES:
+        return values / 1000, f"{VARIABLES[var][0]} (km)"
+    return values, label(var)
+
+
 def norm_for(var, values):
     lo, hi = np.nanmin(values), np.nanmax(values)
+    if var in DISTANCES:
+        return PowerNorm(0.5, vmin=0, vmax=hi)
     if STYLE[var][1]:
         if var.startswith("aspect"):
             m = max(abs(lo), abs(hi))
@@ -127,6 +143,20 @@ def norm_for(var, values):
         if lo < 0 < hi:
             return TwoSlopeNorm(vmin=lo, vcenter=0, vmax=hi)
     return Normalize(lo, hi)
+
+
+def colorbar_ticks(norm):
+    """Ticks for a colour bar: fixed distance ticks on a square-root scale; for a scale
+    centred on zero, ticks on both sides of zero; otherwise about 5 round values."""
+    if isinstance(norm, PowerNorm):
+        return [t for t in DISTANCE_TICKS if t <= norm.vmax]
+    if isinstance(norm, TwoSlopeNorm):
+        neg = mticker.MaxNLocator(2).tick_values(norm.vmin, 0)
+        pos = mticker.MaxNLocator(3).tick_values(0, norm.vmax)
+        ticks = np.union1d(neg[neg >= norm.vmin], pos[pos <= norm.vmax])
+        return list(ticks)
+    ticks = mticker.MaxNLocator(5).tick_values(norm.vmin, norm.vmax)
+    return list(ticks[(ticks >= norm.vmin) & (ticks <= norm.vmax)])
 
 
 def panel_positions(n, ncols, panel_w, panel_h):
@@ -156,18 +186,19 @@ def plot_maps(grid, means, variables, ncols, width_cm, name, appendix):
     frac = lambda l, b, w, h: [l / width_cm, b / height_cm, w / width_cm, h / height_cm]
     for k, (var, (left, bottom, first_col)) in enumerate(zip(variables, positions)):
         ax = fig.add_axes(frac(left, bottom, panel_w, panel_h))
-        values = means[var].to_numpy()
+        values, cbar_label = map_values(var, means)
+        norm = norm_for(var, values)
         im = draw_raster(ax, grid, cells_to_raster(grid, means.cell_id, values),
-                         cmap=STYLE[var][0], norm=norm_for(var, values))
+                         cmap=STYLE[var][0], norm=norm)
         draw_boundaries(ax, departments=False)
         setup_map(ax, left=first_col, bottom=True)
         add_panel_label(ax, k)
 
         cax = fig.add_axes(frac(left, bottom - CBAR_OFFSET - CBAR_HEIGHT, panel_w, CBAR_HEIGHT))
         cbar = fig.colorbar(im, cax=cax, orientation="horizontal")
-        cbar.set_label(label(var), labelpad=2)
-        cbar.locator = mticker.MaxNLocator(5)
-        cbar.update_ticks()
+        cbar.set_label(cbar_label, labelpad=2)
+        cbar.set_ticks(colorbar_ticks(norm))
+        cbar.minorticks_off()
         cbar.outline.set_linewidth(0.4)
 
     save_figure(fig, name, appendix=appendix)

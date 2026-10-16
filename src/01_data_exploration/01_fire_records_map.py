@@ -2,7 +2,8 @@
 01_fire_records_map.py
 ----------------------
 Map of the grid cells with at least one forest-fire record in the training years
-(Fig. 1 of the paper, study area and fire data).
+(Fig. 1 of the paper, study area and fire data). Cells outside the pipeline's cell set
+(lakes, where no aspect is defined; utils/chelsa_grid.py) are left blank.
 
 Input:  paths.inputs.training_set — the fire labels (identical for every GCM; the first
         GCM's rows are read).
@@ -50,9 +51,9 @@ def load_fire_cells():
 
 def plot(grid, cells):
     setup_style()
-    fig = plt.figure(figsize=(cm(12), cm(9.2)))
-    ax = fig.add_axes([0.07, 0.06, 0.66, 0.92])
-    ax_loc = fig.add_axes([0.75, 0.62, 0.24, 0.34])
+    fig = plt.figure(figsize=(cm(13), cm(9.2)))
+    ax = fig.add_axes([0.065, 0.06, 0.6, 0.92])
+    ax_loc = fig.add_axes([0.69, 0.64, 0.3, 0.33])
 
     has_fire = (cells.n_fire_months > 0).astype(float)
     raster = cells_to_raster(grid, cells.cell_id, has_fire)
@@ -73,7 +74,7 @@ def plot(grid, cells):
         Line2D([], [], label="Department border", **DEPARTMENT_LINE),
         Line2D([], [], label="Neighbouring country", **NEIGHBOUR_LINE),
     ]
-    fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.745, 0.58),
+    fig.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.69, 0.58),
                handlelength=1.2, handleheight=0.9, borderaxespad=0)
 
     save_figure(fig, NAME)

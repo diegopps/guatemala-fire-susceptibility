@@ -197,7 +197,7 @@ def plot_trends(means):
             ax.plot(df.index, df.median(axis=1), color=color, zorder=3)
         ax.axvline(cfg.periods.historical.stop - 0.5, color="#9e9e9e", linewidth=0.5,
                    linestyle=(0, (3, 2)), zorder=0)
-        ax.set_ylabel(label(var))
+        ax.set_ylabel(label(var, wrap=True))     # unit on a second line: same layout in every panel
         ax.yaxis.set_major_locator(mticker.MaxNLocator(5))
         ax.xaxis.set_major_locator(mticker.MultipleLocator(20))
         ax.xaxis.set_minor_locator(mticker.MultipleLocator(10))
@@ -223,7 +223,7 @@ def plot_trends(means):
                   title=f"{WINDOW}-year running means", alignment="left",
                   loc="upper left", bbox_to_anchor=(0.05, 0.45), handlelength=2)
 
-    fig.subplots_adjust(left=0.08, right=0.99, bottom=0.05, top=0.98, wspace=0.22, hspace=0.18)
+    fig.subplots_adjust(left=0.09, right=0.97, bottom=0.05, top=0.98, wspace=0.25, hspace=0.18)
     save_figure(fig, "01_climate_trends")
     plt.close(fig)
 
