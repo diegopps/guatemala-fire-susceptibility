@@ -47,6 +47,7 @@ def load(path=CONFIG_FILE):
     paths.data_dir = data_dir
     paths.results_dir = PROJECT_DIR / paths.results_dir
     paths.models_dir = PROJECT_DIR / paths.models_dir
+    paths.manifest = PROJECT_DIR / paths.manifest
     for section, base in [("raw", data_dir), ("inputs", data_dir), ("generated", data_dir),
                           ("results", paths.results_dir)]:
         for key, rel in paths[section].items():
