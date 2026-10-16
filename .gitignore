@@ -3,3 +3,7 @@ data
 
 # SLURM logs
 logs/
+
+# Pycache
+src/00_preprocessing/__pycache__/
+src/utils/__pycache__/
