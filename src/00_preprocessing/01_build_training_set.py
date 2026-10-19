@@ -7,7 +7,8 @@ The climate of every GCM in gcms.models is included (pooled training, one model 
 algorithm); the fire labels are therefore repeated once per GCM.
 
 Inputs (paths and settings in config.toml):
-  - Fire records      paths.raw.fire_records — cell-months with at least one forest-fire report.
+  - Fire records      paths.raw.fire_records — cell-months with at least one forest-fire report;
+                      only those of training.years are used.
   - Monthly climate   paths.generated.climate_monthly_gcm — monthly means per GCM of the
                       CHELSA-downscaled ISIMIP3b data (tas, tasmax, tasmin, pr, rsds), built
                       by 00_aggregate_monthly_gcm.py (stored as float32, read as float64),
@@ -111,9 +112,14 @@ def add_pet_and_water_balance(df, year):
     df["climbal"] = climatic_water_balance(df.pr.to_numpy(), df.PET.to_numpy(), days)
 
 
-def load_fires(grid):
-    """Fire cell-months as grid indices (i, j, year, month)."""
+def load_fires(grid, years):
+    """Fire cell-months of the training years as grid indices (i, j, year, month)."""
     f = pd.read_csv(cfg.paths.raw.fire_records)
+    outside_years = ~f.year.isin(years)
+    if outside_years.any():
+        print(f"  fire cell-months outside the training years (dropped): {outside_years.sum()} "
+              f"({', '.join(map(str, sorted(f.year[outside_years].unique())))})")
+    f = f[~outside_years]
     i, j, inside = grid.index(f.lat, f.lon)
     return pd.DataFrame({"i": i, "j": j, "year": f.year, "month": f.month})[inside].drop_duplicates()
 
@@ -134,7 +140,8 @@ def main():
     cells = load_static(grid)
     print(f"  cells kept: {len(cells):,}")
 
-    fires = load_fires(grid).assign(fire=np.int8(1))
+    print("Fire records:")
+    fires = load_fires(grid, years).assign(fire=np.int8(1))
     gcm_type = pd.CategoricalDtype(gcms)
 
     out = cfg.paths.inputs.training_set

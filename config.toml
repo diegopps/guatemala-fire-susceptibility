@@ -24,7 +24,7 @@ climate_gcms     = "rawdata/chelsaGT_raw/menz_output"                 # daily pe
 static_vars      = "rawdata/static_vars"                              # static layers, see [preprocessing.static_files]
 
 [paths.inputs]            # relative to data_dir — model inputs built by src/00_preprocessing
-training_set  = "indata/training/allvars_2017-2024.parquet"  # built by 01_build_training_set.py
+training_set  = "indata/training/allvars_2018-2024.parquet"  # built by 01_build_training_set.py
 future_inputs = "indata/data_fullfuture_processed"  # <scenario>/ subfolders, see [files]
 boundaries    = "boundaries_shp"                    # Natural Earth 10m admin-1 v5.1.1, see [files]
 
@@ -73,7 +73,7 @@ features = [
 ]
 
 [training]
-years            = [2017, 2018, 2019, 2020, 2021, 2022, 2024]   # 2023 excluded: no fire records
+years            = [2018, 2019, 2020, 2021, 2022, 2024]   # 2017 excluded; 2023: no fire records
 climate_scenario = "ssp370"       # scenario whose climate represents the training years
 
 [preprocessing.static_files]      # under paths.raw.static_vars; key = column in the file
