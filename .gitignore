@@ -4,5 +4,8 @@ data
 # SLURM logs
 logs/
 
+# Results
+results/
+
 # Pycache
 __pycache__/

@@ -134,7 +134,7 @@ seed  = 107
 split = { train = 0.65, test = 0.25, validation = 0.10 }   # stratified by the fire label
 
 [model_training.paths.inputs]     # relative to data_dir
-split_data = "indata/training/split_index_cellmonths"   # split index, model matrices and stats/, built by 00_split_data.py
+split_data = "indata/training/split_index"   # split index, model matrices and stats/, built by 00_split_data.py
 
 [model_training.paths.generated]  # relative to data_dir — predictions of each step
 model_testing = "predictions/02_model_training/model_testing"

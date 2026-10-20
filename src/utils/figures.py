@@ -13,6 +13,7 @@ CLIMATE_VARIABLES, STATIC_VARIABLES   the two predictor groups, in display order
 label(var, wrap=False)          axis or colour-bar label, e.g. "Mean temperature (°C)"
 to_display_units(var, values, days)   predictor units -> display units
 SCENARIOS                       label and colour of the climate scenarios (Okabe–Ito colours)
+MODELS                          label, short label and colour of the candidate algorithms
 lighten(color, amount)          colour mixed with white
 cm(x)                           centimetres -> inches
 add_panel_label(ax, i)          "(a)", "(b)", ... at the top left of an axes
@@ -56,6 +57,19 @@ SCENARIOS = {
     "ssp126":     {"label": cfg.scenarios.labels.ssp126, "color": "#009E73"},
     "ssp370":     {"label": cfg.scenarios.labels.ssp370, "color": "#0072B2"},
     "ssp585":     {"label": cfg.scenarios.labels.ssp585, "color": "#D55E00"},
+}
+
+# Candidate algorithms, keyed as in the model-training scripts: the same colour in every
+# figure (Okabe–Ito palette; grey instead of its yellow, which is faint as a line).
+MODELS = {
+    "random_forest":       {"label": "Random forest",        "short": "RF",   "color": "#0072B2"},
+    "extra_trees":         {"label": "Extra trees",          "short": "XT",   "color": "#E69F00"},
+    "xgboost":             {"label": "XGBoost",              "short": "XGB",  "color": "#009E73"},
+    "gradient_boosting":   {"label": "Gradient boosting",    "short": "GB",   "color": "#CC79A7"},
+    "logistic_regression": {"label": "Logistic regression",  "short": "LR",   "color": "#56B4E9"},
+    "knn":                 {"label": "k-nearest neighbours", "short": "k-NN", "color": "#D55E00"},
+    "naive_bayes":         {"label": "Naive Bayes",          "short": "NB",   "color": "#999999"},
+    "decision_tree":       {"label": "Decision tree",        "short": "DT",   "color": "#000000"},
 }
 
 
