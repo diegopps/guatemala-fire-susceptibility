@@ -1,319 +1,195 @@
 """
-model_testing.py
-----------------
-Runs a single baseline ML model on the train/test split and saves all
-metrics and data needed for downstream plotting. Additionally, tests for multiple thresholds
-to evaluate model metrics. This is meant for exploring using different thresholds for classifying 
-the very unbalanced forest fire dataset
+01_model_testing.py
+-------------------
+Fits one candidate algorithm, with default settings, on the train subset and predicts
+the fire probability of every test row (all GCMs). 01_model_testing_evaluate.py scores
+the predictions.
+
+Candidates (MODELS): logistic regression, decision tree, random forest, gradient
+boosting, XGBoost, extra trees, k-nearest neighbours and Gaussian naive Bayes.
+- Class imbalance: every algorithm that supports it weights the two classes inversely
+  to their frequency in the train subset ("balanced"), through class_weight, sample
+  weights or, for XGBoost, scale_pos_weight. k-nearest neighbours has no class weights.
+- Logistic regression and k-nearest neighbours depend on the scale of the predictors and
+  standardize them first (scaler fitted on the train subset).
+
+Input:  model data of 00_split_data.py (see data.py)
+Output: model_training.paths.generated.model_testing/<model>.npy — fire probability of each
+        test row (float32, in the row order of the test subset)
+        results/<model_training model_testing>/<model>/
+          model_info.json         settings, train size, fit and prediction times
+          feature_importance.csv  impurity-based importance (tree models) or coefficients
+                                  of the standardized predictors (logistic regression)
+Existing output is kept unless --force is given.
+
+Prediction in parts (used for k-nearest neighbours): --part I --parts N fits the model
+and predicts only the I-th of N blocks of test rows (<model>.part<I>of<N>.npy). The
+evaluation joins the parts once all of them exist.
+
+--trial fits on 1% of the train rows and predicts 1% of the test rows (drawn at random
+with seed model_training.seed), to time a model before the full run. Its output goes to
+folders named <...>_trial and is never evaluated.
 
 Usage:
-    python model_testing.py <model_name>
-
-Example:
-    python model_testing.py random_forest
-
-Each model is intended to be submitted as a separate SLURM job via a
-bash wrapper script.
+    python 01_model_testing.py <model> [--part I --parts N] [--trial] [--force]
 """
 
-# =============================================================================
-# SETTINGS
-# =============================================================================
-
-PROJECT_DIR = "/home/diegopab/projects/ForestFire_GT/paperwriting/ForestFireGT"
-INPUT_DATA_PATH  = f"{PROJECT_DIR}/data/indata/data_trainingset_2017-2024/allvars_2017-2024.csv"
-SPLIT_INDEX_PATH = f"{PROJECT_DIR}/data/processed/split_index.csv"
-OUTPUT_DIR       = f"{PROJECT_DIR}/results/01_model_testing/"
-
-# Features to use (fire is always excluded as target; lat, lon, year excluded)
-FEATURE_COLUMNS = [
-    "PET", "climbal", "pr", "rsds",
-    "tas", "tasmax", "tasmin",
-    "aspect_sin", "aspect_cos",
-    "distRoads", "distUrban", "distWater",
-    "elev", "slope",
-]
-
-TARGET_COLUMN = "fire"
-
-# Thresholds to evaluate — metrics.json and confusion_matrix.csv are saved
-# separately as a file for each threshold.
-# PR/ROC curves and feature importance are threshold-independent and saved once.
-THRESHOLDS = [0.01, 0.03, 0.05, 0.08, 0.1, 0.2, 0.3, 0.4, 0.5]
-
-# Models available to run — pass one of these keys as CLI argument
-MODELS = {
-    "logistic_regression": {
-        "class": "sklearn.linear_model.LogisticRegression",
-        "params": {
-            "class_weight": "balanced",
-            "max_iter": 1000,
-            "random_state": 42,
-        },
-    },
-    "decision_tree": {
-        "class": "sklearn.tree.DecisionTreeClassifier",
-        "params": {
-            "class_weight": "balanced",
-            "random_state": 42,
-        },
-    },
-    "random_forest": {
-        "class": "sklearn.ensemble.RandomForestClassifier",
-        "params": {
-            "n_estimators": 100,
-            "class_weight": "balanced",
-            "random_state": 42,
-            "n_jobs": -1,
-        },
-    },
-    "gradient_boosting": {
-        "class": "sklearn.ensemble.GradientBoostingClassifier",
-        "params": {
-            "n_estimators": 100,
-            "random_state": 42,
-        },
-    },
-    "xgboost": {
-        "class": "xgboost.XGBClassifier",
-        "params": {
-            "n_estimators": 100,
-            "use_label_encoder": False,
-            "eval_metric": "logloss",
-            "random_state": 42,
-            "n_jobs": -1,
-        },
-    },
-    "extra_trees": {
-        "class": "sklearn.ensemble.ExtraTreesClassifier",
-        "params": {
-            "n_estimators": 100,
-            "class_weight": "balanced",
-            "random_state": 42,
-            "n_jobs": -1,
-        },
-    },
-    "knn": {
-        "class": "sklearn.neighbors.KNeighborsClassifier",
-        "params": {
-            "n_neighbors": 5,
-            "n_jobs": -1,
-        },
-    },
-    "naive_bayes": {
-        "class": "sklearn.naive_bayes.GaussianNB",
-        "params": {},
-    },
-}
-
-# =============================================================================
-# IMPORTS
-# =============================================================================
-
-import sys
-import os
+import argparse
 import json
-import importlib
+import sys
+import time
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
-from sklearn.metrics import (
-    balanced_accuracy_score,
-    matthews_corrcoef,
-    average_precision_score,
-    roc_auc_score,
-    confusion_matrix,
-    precision_recall_curve,
-    roc_curve,
-)
+from sklearn.ensemble import ExtraTreesClassifier, GradientBoostingClassifier, RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.naive_bayes import GaussianNB
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.utils.class_weight import compute_sample_weight
+from xgboost import XGBClassifier
+
+sys.path.append(str(Path(__file__).resolve().parents[1] / "utils"))
+from load_config import cfg
+from resources import n_cpus, report_usage
+import data
+
+SEED = 42                   # random_state of the algorithms
+TRIAL_FRACTION = 0.01
+PREDICT_BLOCK = 1_000_000   # test rows per predict_proba call
+
 
 # =============================================================================
-# HELPERS
+# CANDIDATE ALGORITHMS
 # =============================================================================
+# Each entry builds (estimator, keyword arguments of fit) from the train labels y and the
+# number of CPUs. Settings are library defaults except those given here.
 
-def load_model(model_key):
-    """Dynamically instantiate a model from its dotted class path."""
-    config = MODELS[model_key]
-    module_path, class_name = config["class"].rsplit(".", 1)
-    module = importlib.import_module(module_path)
-    cls = getattr(module, class_name)
-    return cls(**config["params"])
+def _balanced_weights(y):
+    return {"sample_weight": compute_sample_weight("balanced", y)}
 
 
-def load_data():
-    """Load the full dataset and split index, return train/test subsets."""
-    print(f"Loading data from: {INPUT_DATA_PATH}")
-    df = pd.read_csv(INPUT_DATA_PATH)
-
-    print(f"Loading split index from: {SPLIT_INDEX_PATH}")
-    split_index = pd.read_csv(SPLIT_INDEX_PATH)
-
-    # Merge split labels onto the main dataframe by position
-    df["_split"] = split_index.set_index("row_index")["split"].values
-
-    df_train = df[df["_split"] == "train"].copy()
-    df_test  = df[df["_split"] == "test"].copy()
-
-    print(f"  Train rows : {len(df_train):,}")
-    print(f"  Test rows  : {len(df_test):,}")
-
-    X_train = df_train[FEATURE_COLUMNS]
-    y_train = df_train[TARGET_COLUMN]
-    X_test  = df_test[FEATURE_COLUMNS]
-    y_test  = df_test[TARGET_COLUMN]
-
-    return X_train, y_train, X_test, y_test
+MODELS = {
+    "logistic_regression": lambda y, cpus: (
+        make_pipeline(StandardScaler(), LogisticRegression(class_weight="balanced", max_iter=1000,
+                                                           random_state=SEED)), {}),
+    "decision_tree": lambda y, cpus: (
+        DecisionTreeClassifier(class_weight="balanced", random_state=SEED), {}),
+    "random_forest": lambda y, cpus: (
+        RandomForestClassifier(n_estimators=100, class_weight="balanced", random_state=SEED,
+                               n_jobs=cpus), {}),
+    "gradient_boosting": lambda y, cpus: (
+        GradientBoostingClassifier(n_estimators=100, random_state=SEED), _balanced_weights(y)),
+    "xgboost": lambda y, cpus: (
+        XGBClassifier(n_estimators=100, eval_metric="logloss", random_state=SEED, n_jobs=cpus,
+                      scale_pos_weight=float((y == 0).sum() / (y == 1).sum())), {}),
+    "extra_trees": lambda y, cpus: (
+        ExtraTreesClassifier(n_estimators=100, class_weight="balanced", random_state=SEED,
+                             n_jobs=cpus), {}),
+    "knn": lambda y, cpus: (
+        make_pipeline(StandardScaler(), KNeighborsClassifier(n_neighbors=5, n_jobs=cpus)), {}),
+    "naive_bayes": lambda y, cpus: (GaussianNB(), _balanced_weights(y)),
+}
 
 
-def save_json(data, path):
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
-    print(f"  Saved: {path}")
+def prediction_file(folder, model, part=None, parts=None):
+    name = model if part is None else f"{model}.part{part}of{parts}"
+    return folder / f"{name}.npy"
 
 
-def save_csv(df, path):
-    df.to_csv(path, index_label="actual_class")
-    print(f"  Saved: {path}")
+def feature_importance(model):
+    """Impurity-based importance, or coefficients of the standardized predictors; None otherwise."""
+    final = model[-1] if hasattr(model, "steps") else model
+    if hasattr(final, "feature_importances_"):
+        return pd.DataFrame({"feature": cfg.data.features, "importance": final.feature_importances_})
+    if hasattr(final, "coef_"):
+        return pd.DataFrame({"feature": cfg.data.features, "coefficient": final.coef_[0]})
+    return None
 
 
 # =============================================================================
 # MAIN
 # =============================================================================
 
-def main(model_key):
-    if model_key not in MODELS:
-        print(f"ERROR: Unknown model '{model_key}'.")
-        print(f"Available models: {', '.join(MODELS.keys())}")
-        sys.exit(1)
+def save_npy(path, array):
+    tmp = path.with_name(path.name + ".tmp")
+    with open(tmp, "wb") as f:
+        np.save(f, array)
+    tmp.rename(path)
 
-    # --- Output directory for this model ---
-    model_out_dir = os.path.join(OUTPUT_DIR, model_key)
-    os.makedirs(model_out_dir, exist_ok=True)
-    print(f"\n{'='*60}")
-    print(f"Model: {model_key}")
-    print(f"Output directory: {model_out_dir}")
-    print(f"{'='*60}\n")
 
-    # --- Load data ---
-    X_train, y_train, X_test, y_test = load_data()
+def main(model_name, part, parts, trial, force):
+    pred_dir = cfg.model_training.paths.generated.model_testing
+    res_dir = cfg.model_training.paths.results.model_testing / model_name
+    if trial:
+        pred_dir = pred_dir.with_name(pred_dir.name + "_trial")
+        res_dir = res_dir.parent.with_name(res_dir.parent.name + "_trial") / model_name
+    out = prediction_file(pred_dir, model_name, part, parts)
+    if out.exists() and not force:
+        print(f"{out} exists; use --force to recompute.")
+        return
+    pred_dir.mkdir(parents=True, exist_ok=True)
+    res_dir.mkdir(parents=True, exist_ok=True)
+    cpus = n_cpus()
+    rng = np.random.default_rng(cfg.model_training.seed)
 
-    # --- Train ---
-    print(f"\nTraining {model_key}...")
-    model = load_model(model_key)
-    model.fit(X_train, y_train)
-    print("  Training complete.")
+    print(f"Model: {model_name}" + (" (trial)" if trial else ""))
+    train = data.load_subset("train", arrays=("X", "y"))
+    rows = np.arange(len(train["y"]))
+    if trial:
+        rows = np.sort(rng.choice(rows, int(TRIAL_FRACTION * rows.size), replace=False))
+    X, y = np.ascontiguousarray(train["X"][rows]), np.asarray(train["y"][rows])
+    n_train, n_train_fire = len(y), int(y.sum())
+    print(f"  train rows: {n_train:,} ({n_train_fire:,} fire), {cpus} CPUs")
 
-    # --- Predict ---
-    print("\nGenerating predictions...")
-    y_pred = model.predict(X_test)
+    model, fit_kwargs = MODELS[model_name](y, cpus)
+    t0 = time.monotonic()
+    model.fit(X, y, **fit_kwargs)
+    fit_seconds = time.monotonic() - t0
+    print(f"  fitted in {fit_seconds / 60:.1f} min")
+    del X, y, fit_kwargs
 
-    # Predicted probabilities (positive class)
-    if hasattr(model, "predict_proba"):
-        y_prob = model.predict_proba(X_test)[:, 1]
-    elif hasattr(model, "decision_function"):
-        # Fallback for models without predict_proba (e.g. SVM)
-        y_prob = model.decision_function(X_test)
-    else:
-        y_prob = None
-        print("  WARNING: Model does not support probability estimates.")
+    test_X = data.load_subset("test", arrays=("X",))["X"]
+    rows = np.arange(len(test_X))
+    if trial:
+        rows = np.sort(rng.choice(rows, int(TRIAL_FRACTION * rows.size), replace=False))
+    if part is not None:
+        rows = np.array_split(rows, parts)[part - 1]
+    prob = np.empty(rows.size, dtype=np.float32)
+    t0 = time.monotonic()
+    for start in range(0, rows.size, PREDICT_BLOCK):
+        block = rows[start:start + PREDICT_BLOCK]
+        prob[start:start + block.size] = model.predict_proba(np.asarray(test_X[block]))[:, 1]
+    predict_seconds = time.monotonic() - t0
+    print(f"  predicted {rows.size:,} test rows in {predict_seconds / 60:.1f} min")
+    save_npy(out, prob)
+    print(f"  Saved: {out}")
 
-    # --- Metrics and confusion matrix — one set per threshold ---
-    # PR/ROC curves and feature importance are threshold-independent and saved once below.
-    print("\nComputing metrics and confusion matrices per threshold...")
-
-    # Threshold-independent metrics computed once
-    avg_prec = average_precision_score(y_test, y_prob) if y_prob is not None else None
-    roc_auc  = roc_auc_score(y_test, y_prob)           if y_prob is not None else None
-
-    for thresh in THRESHOLDS:
-        # Binarize probabilities at this threshold; fall back to default y_pred if no probs
-        if y_prob is not None:
-            y_pred_t = (y_prob >= thresh).astype(int)
-        else:
-            y_pred_t = y_pred  # only one threshold makes sense without probabilities
-
-        bal_acc = balanced_accuracy_score(y_test, y_pred_t)
-        mcc     = matthews_corrcoef(y_test, y_pred_t)
-
-        metrics = {
-            "model":             model_key,
-            "threshold":         thresh,
-            "balanced_accuracy": bal_acc,
-            "matthews_corrcoef": mcc,
-            "average_precision": avg_prec,
-            "roc_auc":           roc_auc,
-        }
-
-        print(f"\n  Threshold: {thresh}")
-        print(f"    Balanced Accuracy : {bal_acc:.4f}")
-        print(f"    MCC               : {mcc:.4f}  <-- primary metric")
-        print(f"    Average Precision : {avg_prec:.4f}" if avg_prec is not None else "    Average Precision : N/A")
-        print(f"    ROC AUC           : {roc_auc:.4f}" if roc_auc is not None else "    ROC AUC           : N/A")
-
-        save_json(metrics, os.path.join(model_out_dir, f"metrics_{thresh}.json"))
-
-        # Confusion matrix
-        cm = confusion_matrix(y_test, y_pred_t)
-        cm_df = pd.DataFrame(
-            cm,
-            index=["actual_negative", "actual_positive"],
-            columns=["predicted_negative", "predicted_positive"],
-        )
-        save_csv(cm_df, os.path.join(model_out_dir, f"confusion_matrix_{thresh}.csv"))
-
-    # --- Raw predictions & probabilities ---
-    preds_df = pd.DataFrame({
-        "y_true": y_test.values,
-        "y_pred": y_pred,
-        "y_prob": y_prob if y_prob is not None else np.nan,
-    })
-    save_csv(preds_df, os.path.join(model_out_dir, "predictions.csv"))
-
-    # --- PR curve ---
-    if y_prob is not None:
-        precision, recall, pr_thresholds = precision_recall_curve(y_test, y_prob)
-        pr_df = pd.DataFrame({
-            "precision": precision[:-1],
-            "recall": recall[:-1],
-            "threshold": pr_thresholds,
-        })
-        save_csv(pr_df, os.path.join(model_out_dir, "pr_curve.csv"))
-
-    # --- ROC curve ---
-    if y_prob is not None:
-        fpr, tpr, roc_thresholds = roc_curve(y_test, y_prob)
-        roc_df = pd.DataFrame({
-            "fpr": fpr,
-            "tpr": tpr,
-            "threshold": roc_thresholds,
-        })
-        save_csv(roc_df, os.path.join(model_out_dir, "roc_curve.csv"))
-
-    # --- Variable importance ---
-    if hasattr(model, "feature_importances_"):
-        importance_df = pd.DataFrame({
-            "feature": FEATURE_COLUMNS,
-            "importance": model.feature_importances_,
-        }).sort_values("importance", ascending=False)
-        save_csv(importance_df, os.path.join(model_out_dir, "feature_importance.csv"))
-    elif hasattr(model, "coef_"):
-        # Linear models (e.g. logistic regression)
-        importance_df = pd.DataFrame({
-            "feature": FEATURE_COLUMNS,
-            "coefficient": model.coef_[0],
-        }).sort_values("coefficient", key=abs, ascending=False)
-        save_csv(importance_df, os.path.join(model_out_dir, "feature_importance.csv"))
-    else:
-        print("  NOTE: Model does not expose feature importances — skipping.")
-
-    print(f"\nDone. All outputs saved under: {model_out_dir}/")
-    print(f"  Threshold-specific outputs: metrics.json, confusion_matrix.csv")
-    print(f"  Threshold-independent outputs: predictions.csv, pr_curve.csv, roc_curve.csv, feature_importance.csv")
+    if part in (None, 1):
+        info = {"model": model_name, "estimator": repr(model), "trial": trial,
+                "train_rows": n_train, "train_fire_rows": n_train_fire,
+                "cpus": cpus, "fit_minutes": round(fit_seconds / 60, 2),
+                "predict_minutes": round(predict_seconds / 60, 2),
+                "predicted_rows": int(rows.size), "part": part, "parts": parts}
+        (res_dir / "model_info.json").write_text(json.dumps(info, indent=2))
+        importance = feature_importance(model)
+        if importance is not None:
+            importance.to_csv(res_dir / "feature_importance.csv", index=False)
+        print(f"  Saved: {res_dir}/")
+    report_usage()
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python model_testing.py <model_name>")
-        print(f"Available models: {', '.join(MODELS.keys())}")
-        sys.exit(1)
-
-    main(sys.argv[1])
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("model", choices=MODELS)
+    parser.add_argument("--part", type=int, help="block of test rows to predict (1..parts)")
+    parser.add_argument("--parts", type=int, help="number of blocks of test rows")
+    parser.add_argument("--trial", action="store_true", help="1%% of the rows, separate output")
+    parser.add_argument("--force", action="store_true", help="recompute existing output")
+    a = parser.parse_args()
+    if (a.part is None) != (a.parts is None) or (a.part is not None and not 1 <= a.part <= a.parts):
+        parser.error("--part I and --parts N go together, with 1 <= I <= N.")
+    main(a.model, a.part, a.parts, a.trial, a.force)

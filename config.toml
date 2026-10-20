@@ -6,6 +6,8 @@
 # - The data directory can be overridden with the environment variable FFGT_DATA_DIR.
 # - Year periods are inclusive [first, last] and are returned as Python ranges.
 # - Settings used by a single step (e.g. the tuning search space) stay in that script.
+# - A section may hold its own [<section>.paths.raw|inputs|generated|results] tables; they
+#   are resolved like the [paths.*] tables of the same name.
 
 # =============================================================================
 # PATHS
@@ -30,7 +32,6 @@ boundaries    = "boundaries_shp"                    # Natural Earth 10m admin-1 
 
 [paths.generated]         # relative to data_dir — large pipeline outputs kept on project storage
 climate_monthly_gcm = "rawdata/processed/climate_monthly_gcm"  # monthly means per GCM, all scenarios/years, built by 00_aggregate_monthly_gcm.py
-split_index        = "processed/split_index.csv"
 future_predictions = "classified_future"            # <MODEL>/<scenario>/ subfolders, see [files]
 
 [paths.results]           # relative to results_dir
@@ -38,13 +39,8 @@ future_predictions = "classified_future"            # <MODEL>/<scenario>/ subfol
 main_figures     = "mainfigs"
 appendix_figures = "appendix"
 # Tables and diagnostics of each step (including the data behind the paper figures),
-# one folder per stage of src/ and, in stage 2, per step.
+# one folder per stage of src/.
 data_exploration      = "01_data_exploration"
-model_testing         = "02_model_training/01_model_testing"
-overundersampling     = "02_model_training/02_overundersampling"
-hyperparameter_tuning = "02_model_training/03_hyperparameter_tuning"
-final_model_training  = "02_model_training/04_final_model_training"   # also holds risk_thresholds.json per model
-risk_maps             = "02_model_training/06_risk_maps"
 future_classification = "03_future_classification"
 
 [files]                   # filename patterns ({gcm}, {var}, {scenario}, {year})
@@ -128,17 +124,23 @@ max_size_mb        = 2.0
 running_mean_years = 10                  # smoothing of yearly time series (centred, complete windows only)
 
 # =============================================================================
-# SPLIT AND SEEDS
+# MODEL TRAINING (src/02_model_training)
 # =============================================================================
+# Train, test and validation subsets drawn at random from the cell-months of the
+# training years; the rows of all GCMs of a cell-month share one subset.
 
-[split]
-train    = 0.65
-test     = 0.25
-validation = 0.10
-seed     = 107
+[model_training]
+seed  = 107
+split = { train = 0.65, test = 0.25, validation = 0.10 }   # stratified by the fire label
 
-[seeds]
-search = 42                       # RandomizedSearchCV; model/sampler seeds are in their params
+[model_training.paths.inputs]     # relative to data_dir
+split_data = "indata/training/split_index_cellmonths"   # split index, model matrices and stats/, built by 00_split_data.py
+
+[model_training.paths.generated]  # relative to data_dir — predictions of each step
+model_testing = "predictions/02_model_training/model_testing"
+
+[model_training.paths.results]    # relative to results_dir
+model_testing = "02_model_training/01_model_testing"
 
 # =============================================================================
 # MODELS (the three selected models; step-01 exploration models stay in 01_model_testing.py)
@@ -212,11 +214,8 @@ class  = "imblearn.under_sampling.NeighbourhoodCleaningRule"
 params = { n_jobs = -1 }
 
 # =============================================================================
-# THRESHOLDS AND RISK CLASSES
+# RISK CLASSES
 # =============================================================================
-
-[model_exploration]
-thresholds = [0.01, 0.03, 0.05, 0.08, 0.1, 0.2, 0.3, 0.4, 0.5]
 
 [risk_classes]
 quintiles  = [20, 40, 60, 80]
