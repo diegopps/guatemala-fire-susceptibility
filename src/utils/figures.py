@@ -14,6 +14,11 @@ label(var, wrap=False)          axis or colour-bar label, e.g. "Mean temperature
 to_display_units(var, values, days)   predictor units -> display units
 SCENARIOS                       label and colour of the climate scenarios (Okabe–Ito colours)
 MODELS                          label, short label and colour of the candidate algorithms
+SAMPLERS                        label, colour and marker of the resampling methods
+IMBALANCE_LABELS                label of each correction of the class imbalance (samplers
+                                and class weights)
+SCORES                          title and no-skill value of the scores of the model training
+score_axis(ax, title)           style of a score panel (title, bottom axis only)
 lighten(color, amount)          colour mixed with white
 cm(x)                           centimetres -> inches
 add_panel_label(ax, i)          "(a)", "(b)", ... at the top left of an axes
@@ -70,6 +75,30 @@ MODELS = {
     "knn":                 {"label": "k-nearest neighbours", "short": "k-NN", "color": "#D55E00"},
     "naive_bayes":         {"label": "Naive Bayes",          "short": "NB",   "color": "#999999"},
     "decision_tree":       {"label": "Decision tree",        "short": "DT",   "color": "#000000"},
+}
+
+# Resampling methods, keyed as in utils/resampling.py: colours from Paul Tol's muted
+# colour-blind-safe palette (none shared with MODELS); circles for oversampling, squares
+# for undersampling.
+SAMPLERS = {
+    "ros":    {"label": "Random oversampling",         "color": "#332288", "marker": "o"},
+    "smote":  {"label": "SMOTE",                       "color": "#88CCEE", "marker": "o"},
+    "adasyn": {"label": "ADASYN",                      "color": "#44AA99", "marker": "o"},
+    "rus":    {"label": "Random undersampling",        "color": "#882255", "marker": "s"},
+    "tomek":  {"label": "Tomek links",                 "color": "#CC6677", "marker": "s"},
+    "ncr":    {"label": "Neighbourhood cleaning rule", "color": "#DDCC77", "marker": "s"},
+}
+
+# Correction of the class imbalance of a model (config model_training.samplers).
+IMBALANCE_LABELS = {"class_weights": "Class weights", **{k: s["label"] for k, s in SAMPLERS.items()}}
+
+# Scores of the model training, keyed as the columns of the metrics tables: panel title and
+# no-skill value (None: the fire share, for average precision).
+SCORES = {
+    "peak_mcc":          ("Peak MCC",           0.0),
+    "balanced_accuracy": ("Balanced\naccuracy", 0.5),
+    "average_precision": ("Average\nprecision", None),
+    "roc_auc":           ("ROC-AUC",            0.5),
 }
 
 
@@ -137,6 +166,15 @@ def lighten(color, amount):
 def cm(x):
     """Centimetres to inches (matplotlib figure sizes)."""
     return x / 2.54
+
+
+def score_axis(ax, title):
+    """Style of a score panel: the title above it, and only the bottom axis (the categories
+    on the y axis are labelled without tick marks)."""
+    ax.set_title(title, fontsize=FIG.font_size, va="bottom")
+    ax.tick_params(axis="y", length=0)
+    for side in ["top", "right", "left"]:
+        ax.spines[side].set_visible(False)
 
 
 def add_panel_label(ax, i, x=0.0, y=1.02):

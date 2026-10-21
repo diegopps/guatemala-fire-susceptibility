@@ -28,6 +28,10 @@ Output: results/<model_training hyperparameter_tuning>/
           metrics.csv                 per model, base and tuned: configuration, CV peak MCC
                                       (mean and standard deviation over the folds), test scores
           <model>/threshold_curve_tuned.csv  thinned for plotting (all thresholds near the peak)
+          selected_hyperparameters.csv  per model and search-space parameter: the values
+                                      searched, the default (models.py; None = no limit, or the
+                                      library default) and the selected value (empty before
+                                      the refit)
 
 --trial evaluates the trial runs (<...>_trial folders); only the cell-months they predicted
 are scored, and the base test scores are left empty.
@@ -63,6 +67,16 @@ def test_cell_months():
     return rows, y, len(test["y"])
 
 
+def hyperparameters(model, config=None):
+    """Rows of the hyperparameter table of a model: values searched, default and selected
+    value (config None: not selected yet)."""
+    default = tuning.settings(model, {})
+    selected = {} if config is None else tuning.settings(model, tuning.configurations(model)[config])
+    return [{"model": model, "parameter": name, "search_space": ", ".join(map(str, values)),
+             "default": str(default[name]), "selected": str(selected[name]) if selected else ""}
+            for name, values in tuning.search_space(model).items()]
+
+
 def main(trial):
     gen, out_dir = tuning.directories(trial)
     base_metrics = None
@@ -72,7 +86,7 @@ def main(trial):
         else:
             print(f"{BASE_METRICS} not found: base test scores left empty.")
     test = None
-    cv_tables, results = [], []
+    cv_tables, results, params = [], [], []
     for model in MODELS:
         cv = tuning.cv_scores(model, trial)
         if cv.empty:
@@ -104,8 +118,10 @@ def main(trial):
         selection_file = out_dir / model / "selection.json"
         if not selection_file.exists():
             print("  not refitted yet")
+            params += hyperparameters(model)
             continue
         config = json.loads(selection_file.read_text())["config"]
+        params += hyperparameters(model, config)
         tuned = {"model": model, "setting": "tuned", "sampler": sampler, "config": config,
                  "cv_peak_mcc_mean": cv_by_config.peak_mcc_mean[config],
                  "cv_peak_mcc_std": cv_by_config.peak_mcc_std[config]}
@@ -141,7 +157,9 @@ def main(trial):
     out_dir.mkdir(parents=True, exist_ok=True)
     pd.concat(cv_tables).to_csv(out_dir / "cv_results.csv", index=False, float_format="%.6g")
     pd.DataFrame(results).to_csv(out_dir / "metrics.csv", index=False, float_format="%.6g")
-    print(f"\nSaved: {out_dir}/cv_results.csv, metrics.csv and <model>/cv_summary.csv")
+    pd.DataFrame(params).to_csv(out_dir / "selected_hyperparameters.csv", index=False)
+    print(f"\nSaved: {out_dir}/cv_results.csv, metrics.csv, selected_hyperparameters.csv "
+          "and <model>/cv_summary.csv")
     report_usage()
 
 
