@@ -13,7 +13,7 @@ Metrics (all months; utils/classification_metrics.py):
   model is reported at the peak of its curve: peak MCC, the threshold, and the balanced
   accuracy, precision, recall and confusion matrix there.
 
-Input:  model data of 00_split_data.py (see data.py); predictions of 01_model_testing.py
+Input:  model data of 00_split_data.py (see utils/model_data.py); predictions of 01_model_testing.py
 Output: results/<model_training model_testing>/
           metrics.csv                 one row per model
           <model>/threshold_curve.csv thinned for plotting (all thresholds near the peak):
@@ -24,7 +24,6 @@ Usage:
     python 01_model_testing_evaluate.py
 """
 
-import importlib
 import re
 import sys
 from pathlib import Path
@@ -36,9 +35,9 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "utils"))
 from load_config import cfg
 from classification_metrics import plot_points, scores, threshold_curve
 from resources import report_usage
-import data
+import model_data
+from models import MODELS
 
-MODELS = importlib.import_module("01_model_testing").MODELS    # same folder; order of the table
 PRED_DIR = cfg.model_training.paths.generated.model_testing
 OUT_DIR = cfg.model_training.paths.results.model_testing
 
@@ -63,20 +62,9 @@ def load_predictions(model, n_rows):
     return prob
 
 
-def cell_month_layout(test):
-    """Row indices of each GCM in the test subset, checked to list the same cell-months in
-    the same order; returns (rows per GCM as a 2-D array, fire label per cell-month)."""
-    rows = np.stack([np.flatnonzero(test["gcm"] == g) for g in range(len(cfg.gcms.models))])
-    for name in ["cell_id", "year", "month", "y"]:
-        values = np.asarray(test[name])[rows]
-        if not (values == values[0]).all():
-            raise ValueError(f"Test rows of the GCMs are not aligned by cell-month ({name}).")
-    return rows, np.asarray(test["y"])[rows[0]]
-
-
 def main():
-    test = data.load_subset("test", arrays=("y", "cell_id", "year", "month", "gcm"))
-    rows, y = cell_month_layout(test)
+    test = model_data.load_subset("test", arrays=("y", "cell_id", "year", "month", "gcm"))
+    rows, y = model_data.cell_month_rows(test)
     print(f"Test: {rows.shape[1]:,} cell-months ({int(y.sum()):,} fire) x {rows.shape[0]} GCMs")
 
     results = []

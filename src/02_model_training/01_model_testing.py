@@ -5,15 +5,12 @@ Fits one candidate algorithm, with default settings, on the train subset and pre
 the fire probability of every test row (all GCMs). 01_model_testing_evaluate.py scores
 the predictions.
 
-Candidates (MODELS): logistic regression, decision tree, random forest, gradient
-boosting, XGBoost, extra trees, k-nearest neighbours and Gaussian naive Bayes.
-- Class imbalance: every algorithm that supports it weights the two classes inversely
-  to their frequency in the train subset ("balanced"), through class_weight, sample
-  weights or, for XGBoost, scale_pos_weight. k-nearest neighbours has no class weights.
-- Logistic regression and k-nearest neighbours depend on the scale of the predictors and
-  standardize them first (scaler fitted on the train subset).
+Candidates: the 8 algorithms of models.py (logistic regression, decision tree, random
+forest, gradient boosting, XGBoost, extra trees, k-nearest neighbours and Gaussian naive
+Bayes), each with balanced class weights where the algorithm supports them; logistic
+regression and k-nearest neighbours standardize the predictors first.
 
-Input:  model data of 00_split_data.py (see data.py)
+Input:  model data of 00_split_data.py (see utils/model_data.py)
 Output: model_training.paths.generated.model_testing/<model>.npy — fire probability of each
         test row (float32, in the row order of the test subset)
         results/<model_training model_testing>/<model>/
@@ -42,57 +39,15 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import ExtraTreesClassifier, GradientBoostingClassifier, RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.naive_bayes import GaussianNB
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.utils.class_weight import compute_sample_weight
-from xgboost import XGBClassifier
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "utils"))
 from load_config import cfg
 from resources import n_cpus, report_usage
-import data
+import model_data
+from models import MODELS, build
 
-SEED = 42                   # random_state of the algorithms
 TRIAL_FRACTION = 0.01
 PREDICT_BLOCK = 1_000_000   # test rows per predict_proba call
-
-
-# =============================================================================
-# CANDIDATE ALGORITHMS
-# =============================================================================
-# Each entry builds (estimator, keyword arguments of fit) from the train labels y and the
-# number of CPUs. Settings are library defaults except those given here.
-
-def _balanced_weights(y):
-    return {"sample_weight": compute_sample_weight("balanced", y)}
-
-
-MODELS = {
-    "logistic_regression": lambda y, cpus: (
-        make_pipeline(StandardScaler(), LogisticRegression(class_weight="balanced", max_iter=1000,
-                                                           random_state=SEED)), {}),
-    "decision_tree": lambda y, cpus: (
-        DecisionTreeClassifier(class_weight="balanced", random_state=SEED), {}),
-    "random_forest": lambda y, cpus: (
-        RandomForestClassifier(n_estimators=100, class_weight="balanced", random_state=SEED,
-                               n_jobs=cpus), {}),
-    "gradient_boosting": lambda y, cpus: (
-        GradientBoostingClassifier(n_estimators=100, random_state=SEED), _balanced_weights(y)),
-    "xgboost": lambda y, cpus: (
-        XGBClassifier(n_estimators=100, eval_metric="logloss", random_state=SEED, n_jobs=cpus,
-                      scale_pos_weight=float((y == 0).sum() / (y == 1).sum())), {}),
-    "extra_trees": lambda y, cpus: (
-        ExtraTreesClassifier(n_estimators=100, class_weight="balanced", random_state=SEED,
-                             n_jobs=cpus), {}),
-    "knn": lambda y, cpus: (
-        make_pipeline(StandardScaler(), KNeighborsClassifier(n_neighbors=5, n_jobs=cpus)), {}),
-    "naive_bayes": lambda y, cpus: (GaussianNB(), _balanced_weights(y)),
-}
 
 
 def prediction_file(folder, model, part=None, parts=None):
@@ -137,7 +92,7 @@ def main(model_name, part, parts, trial, force):
     rng = np.random.default_rng(cfg.model_training.seed)
 
     print(f"Model: {model_name}" + (" (trial)" if trial else ""))
-    train = data.load_subset("train", arrays=("X", "y"))
+    train = model_data.load_subset("train", arrays=("X", "y"))
     rows = np.arange(len(train["y"]))
     if trial:
         rows = np.sort(rng.choice(rows, int(TRIAL_FRACTION * rows.size), replace=False))
@@ -145,14 +100,14 @@ def main(model_name, part, parts, trial, force):
     n_train, n_train_fire = len(y), int(y.sum())
     print(f"  train rows: {n_train:,} ({n_train_fire:,} fire), {cpus} CPUs")
 
-    model, fit_kwargs = MODELS[model_name](y, cpus)
+    model, fit_kwargs = build(model_name, y, cpus)
     t0 = time.monotonic()
     model.fit(X, y, **fit_kwargs)
     fit_seconds = time.monotonic() - t0
     print(f"  fitted in {fit_seconds / 60:.1f} min")
     del X, y, fit_kwargs
 
-    test_X = data.load_subset("test", arrays=("X",))["X"]
+    test_X = model_data.load_subset("test", arrays=("X",))["X"]
     rows = np.arange(len(test_X))
     if trial:
         rows = np.sort(rng.choice(rows, int(TRIAL_FRACTION * rows.size), replace=False))

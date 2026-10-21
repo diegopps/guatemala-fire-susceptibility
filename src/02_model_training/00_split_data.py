@@ -2,7 +2,7 @@
 00_split_data.py
 ----------------
 Splits the cell-months of the training set into train, test and validation subsets and
-writes the model matrices of each subset (layout in data.py).
+writes the model matrices of each subset (layout in utils/model_data.py).
 
 The unit of the split is the cell-month (cell_id, year, month). The training set holds one
 row per GCM for each cell-month, all with the same fire label; the rows of a cell-month
@@ -15,7 +15,7 @@ Checks: every GCM holds the same cell-months with the same fire labels, each exa
 
 Input:  paths.inputs.training_set
 Output: model_training.paths.inputs.split_data — split_index.parquet, meta.json and one folder
-        of model matrices per subset (see data.py), and stats/ with
+        of model matrices per subset (see utils/model_data.py), and stats/ with
           split_summary.csv  cell-months, fire cell-months, fire share and rows per subset
           split_by_year.csv  fire cell-months per year and subset
           split_by_month.csv fire cell-months per month and subset
@@ -40,7 +40,7 @@ from sklearn.model_selection import train_test_split
 sys.path.append(str(Path(__file__).resolve().parents[1] / "utils"))
 from load_config import cfg
 from resources import report_usage
-import data
+import model_data
 
 KEY = ["year", "month", "cell_id"]
 FEATURES = cfg.data.features
@@ -83,9 +83,9 @@ def split(cm):
     train, test = train_test_split(rest, test_size=frac.test / (frac.train + frac.test),
                                    random_state=seed, stratify=fire[rest])
     codes = np.empty(len(cm), dtype=np.int8)
-    for code, rows in enumerate([train, test, val]):          # order of data.SUBSETS
+    for code, rows in enumerate([train, test, val]):          # order of model_data.SUBSETS
         codes[rows] = code
-    cm["subset"] = pd.Categorical.from_codes(codes, data.SUBSETS)
+    cm["subset"] = pd.Categorical.from_codes(codes, model_data.SUBSETS)
     return cm
 
 
@@ -118,15 +118,15 @@ class CellMonthLookup:
 
 
 def write_matrices(cm, out):
-    """Writes the arrays of each subset (data.ARRAYS) into out/<subset>/, row group by row group."""
+    """Writes the arrays of each subset (model_data.ARRAYS) into out/<subset>/, row group by row group."""
     lookup = CellMonthLookup(cm)
-    n_rows = {s: int((cm.subset == s).sum()) * len(GCMS) for s in data.SUBSETS}
-    arrays, offset = {}, dict.fromkeys(data.SUBSETS, 0)
-    for s in data.SUBSETS:
+    n_rows = {s: int((cm.subset == s).sum()) * len(GCMS) for s in model_data.SUBSETS}
+    arrays, offset = {}, dict.fromkeys(model_data.SUBSETS, 0)
+    for s in model_data.SUBSETS:
         (out / s).mkdir(parents=True)
         arrays[s] = {name: open_memmap(out / s / f"{name}.npy", mode="w+", dtype=dtype,
                                        shape=(n_rows[s], len(FEATURES)) if name == "X" else (n_rows[s],))
-                     for name, dtype in data.ARRAYS.items()}
+                     for name, dtype in model_data.ARRAYS.items()}
 
     pf = pq.ParquetFile(SOURCE)
     for rg in range(pf.num_row_groups):
@@ -143,7 +143,7 @@ def write_matrices(cm, out):
         columns = {"X": df[FEATURES].to_numpy(np.float32), "y": df.fire.to_numpy(np.int8),
                    "cell_id": df.cell_id.to_numpy(np.int32), "year": df.year.to_numpy(np.int16),
                    "month": df.month.to_numpy(np.int8), "gcm": gcm_index[df.gcm.cat.codes.to_numpy()]}
-        for code, s in enumerate(data.SUBSETS):
+        for code, s in enumerate(model_data.SUBSETS):
             rows = subset == code
             n = int(rows.sum())
             for name, values in columns.items():
@@ -156,7 +156,7 @@ def write_matrices(cm, out):
         raise ValueError(f"Rows written {offset} differ from expected {n_rows}.")
     if (lookup.hits[lookup.cm_keys] != len(GCMS)).any() or lookup.hits.sum() != sum(n_rows.values()):
         raise ValueError(f"Not every cell-month has exactly {len(GCMS)} rows.")
-    for s in data.SUBSETS:
+    for s in model_data.SUBSETS:
         for a in arrays[s].values():
             a.flush()
     return n_rows
@@ -173,7 +173,7 @@ def summarize(cm, n_rows, out):
     summary.index = summary.index.astype(str)
     summary.loc["total"] = summary.sum()
     summary["fire_share_pct"] = 100 * summary.fire_cell_months / summary.cell_months
-    summary["rows"] = [n_rows[s] for s in data.SUBSETS] + [sum(n_rows.values())]
+    summary["rows"] = [n_rows[s] for s in model_data.SUBSETS] + [sum(n_rows.values())]
 
     out.mkdir(parents=True, exist_ok=True)
     summary.to_csv(out / "split_summary.csv", float_format="%.4f")
@@ -181,7 +181,7 @@ def summarize(cm, n_rows, out):
         table = cm[cm.fire == 1].pivot_table(index=by, columns="subset", values="fire",
                                              aggfunc="size", fill_value=0, observed=False)
         table.to_csv(out / f"split_by_{by}.csv")
-    print(f"  Saved: {data.STATS.name}/split_summary.csv, split_by_year.csv, split_by_month.csv")
+    print(f"  Saved: {model_data.STATS.name}/split_summary.csv, split_by_year.csv, split_by_month.csv")
     return summary
 
 
@@ -190,8 +190,8 @@ def summarize(cm, n_rows, out):
 # =============================================================================
 
 def main(force):
-    out = data.DIR
-    if data.META.exists() and not force:
+    out = model_data.DIR
+    if model_data.META.exists() and not force:
         print(f"{out} exists; use --force to recompute.")
         return
 
@@ -208,12 +208,12 @@ def main(force):
     cm.to_parquet(tmp / "split_index.parquet", index=False)
 
     print("Summary:")
-    summary = summarize(cm, n_rows, tmp / data.STATS.name)
-    meta = {"source": data.source_signature(), "features": FEATURES, "gcms": GCMS,
+    summary = summarize(cm, n_rows, tmp / model_data.STATS.name)
+    meta = {"source": model_data.source_signature(), "features": FEATURES, "gcms": GCMS,
             "seed": cfg.model_training.seed, "split": dict(cfg.model_training.split),
             "rows": n_rows,
-            "cell_months": {s: int(summary.loc[s, "cell_months"]) for s in data.SUBSETS},
-            "fire_cell_months": {s: int(summary.loc[s, "fire_cell_months"]) for s in data.SUBSETS}}
+            "cell_months": {s: int(summary.loc[s, "cell_months"]) for s in model_data.SUBSETS},
+            "fire_cell_months": {s: int(summary.loc[s, "fire_cell_months"]) for s in model_data.SUBSETS}}
     (tmp / "meta.json").write_text(json.dumps(meta, indent=2))
 
     if out.exists():

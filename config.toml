@@ -130,88 +130,20 @@ running_mean_years = 10                  # smoothing of yearly time series (cent
 # training years; the rows of all GCMs of a cell-month share one subset.
 
 [model_training]
-seed  = 107
-split = { train = 0.65, test = 0.25, validation = 0.10 }   # stratified by the fire label
+seed   = 107
+split  = { train = 0.65, test = 0.25, validation = 0.10 }   # stratified by the fire label
+models = ["extra_trees", "xgboost", "random_forest"]       # chosen in step 01 (highest peak MCC); used from step 02 on
 
 [model_training.paths.inputs]     # relative to data_dir
 split_data = "indata/training/split_index"   # split index, model matrices and stats/, built by 00_split_data.py
 
 [model_training.paths.generated]  # relative to data_dir — predictions of each step
 model_testing = "predictions/02_model_training/model_testing"
+resampling    = "predictions/02_model_training/resampling"
 
 [model_training.paths.results]    # relative to results_dir
 model_testing = "02_model_training/01_model_testing"
-
-# =============================================================================
-# MODELS (the three selected models; step-01 exploration models stay in 01_model_testing.py)
-# =============================================================================
-# params are the base hyperparameters used in steps 02 and 04 (and the base of step 03,
-# which overrides n_jobs = 1 because it parallelises at the search level).
-
-[models.random_forest]
-short   = "RF"
-display = "Random Forest"
-class   = "sklearn.ensemble.RandomForestClassifier"
-sampler = "rus"                   # best sampler from step 02
-params  = { n_estimators = 100, random_state = 42, n_jobs = -1 }
-
-[models.xgboost]
-short   = "XGB"
-display = "XGBoost"
-class   = "xgboost.XGBClassifier"
-sampler = "ncl"
-params  = { n_estimators = 100, use_label_encoder = false, eval_metric = "logloss", random_state = 42, n_jobs = -1 }
-
-[models.extra_trees]
-short   = "XT"
-display = "Extra Trees"
-class   = "sklearn.ensemble.ExtraTreesClassifier"
-sampler = "rus"
-params  = { n_estimators = 100, random_state = 42, n_jobs = -1 }
-
-# =============================================================================
-# SAMPLERS (step 02 compares all; steps 03–04 use each model's `sampler`)
-# =============================================================================
-
-[samplers.ros]
-short  = "ros"
-class  = "imblearn.over_sampling.RandomOverSampler"
-params = { random_state = 42 }
-
-[samplers.smote]
-short  = "smote"
-class  = "imblearn.over_sampling.SMOTE"
-params = { random_state = 42 }
-
-[samplers.svmsmote]
-short  = "svms"
-class  = "imblearn.over_sampling.SVMSMOTE"
-params = { random_state = 42 }
-
-[samplers.adasyn]
-short  = "adsn"
-class  = "imblearn.over_sampling.ADASYN"
-params = { random_state = 42 }
-
-[samplers.rus]
-short  = "rus"
-class  = "imblearn.under_sampling.RandomUnderSampler"
-params = { random_state = 42 }
-
-[samplers.nearmiss]
-short  = "nm"
-class  = "imblearn.under_sampling.NearMiss"
-params = { n_jobs = -1 }
-
-[samplers.tomek]
-short  = "tomk"
-class  = "imblearn.under_sampling.TomekLinks"
-params = { n_jobs = -1 }
-
-[samplers.ncl]
-short  = "ncl"
-class  = "imblearn.under_sampling.NeighbourhoodCleaningRule"
-params = { n_jobs = -1 }
+resampling    = "02_model_training/02_resampling"
 
 # =============================================================================
 # RISK CLASSES
