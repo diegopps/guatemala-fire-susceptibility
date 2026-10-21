@@ -5,8 +5,8 @@ Figure of the resampling step: the test scores of each selected algorithm traine
 each sampler, from the table of 02_resampling_evaluate.py.
 
 One panel per metric (peak MCC, balanced accuracy at the peak, average precision, ROC-AUC),
-each with its own axis range and a dashed line at the no-skill value (MCC 0, balanced
-accuracy and ROC-AUC 0.5, average precision the fire share). One band per algorithm; in
+each with its axis zoomed to the range of the values, so that small differences between
+samplers are visible (the no-skill values lie outside these ranges). One band per algorithm; in
 it, one marker per sampler at a fixed height (circles: oversampling, squares:
 undersampling), so the best sampler of an algorithm is the rightmost marker of its band.
 The black vertical line in each band is the reference: the algorithm with balanced class
@@ -35,19 +35,20 @@ METRICS_FILE = cfg.model_training.paths.results.resampling / "metrics.csv"
 REFERENCE = "class_weights"
 BAND = 0.62             # height of a model's band (models are 1 apart)
 
-# column of metrics.csv, title, no-skill value (None: the fire share), axis start
+PAD = 0.12              # margin around the values, as a share of their range
+
+# column of metrics.csv, title
 METRICS = [
-    ("peak_mcc",          "Peak MCC",            0.0,  0.0),
-    ("balanced_accuracy", "Balanced\naccuracy",  0.5,  0.5),
-    ("average_precision", "Average\nprecision",  None, 0.0),
-    ("roc_auc",           "ROC-AUC",             0.5,  0.5),
+    ("peak_mcc",          "Peak MCC"),
+    ("balanced_accuracy", "Balanced\naccuracy"),
+    ("average_precision", "Average\nprecision"),
+    ("roc_auc",           "ROC-AUC"),
 ]
 
 
-def plot_metric(ax, table, models, column, title, ref, start):
+def plot_metric(ax, table, models, column, title):
     samplers = [s for s in SAMPLERS if s in set(table.sampler)]
     offsets = np.linspace(-BAND / 2, BAND / 2, len(samplers))
-    ax.axvline(ref, color="0.6", lw=0.5, ls="--", zorder=0)
     for i, model in enumerate(models):
         rows = table[table.model == model].set_index("sampler")[column]
         ax.vlines(rows[REFERENCE], i - BAND / 2 - 0.08, i + BAND / 2 + 0.08, color="black", lw=0.9, zorder=1)
@@ -58,9 +59,9 @@ def plot_metric(ax, table, models, column, title, ref, start):
                         mec="0.25", mew=0.3, zorder=2)
         if i:
             ax.axhline(i - 0.5, color="0.9", lw=0.5, zorder=0)
-    values = table[column]
-    hi = values.max() + 0.12 * (values.max() - start)
-    ax.set_xlim(start, hi)
+    values = table[table.model.isin(models)][column]
+    span = values.max() - values.min()
+    ax.set_xlim(values.min() - PAD * span, values.max() + PAD * span)
     ax.set_ylim(len(models) - 0.5, -0.5)
     ax.set_title(title, fontsize=cfg.figures.font_size, va="bottom")
     ax.xaxis.set_major_locator(plt.MaxNLocator(3))
@@ -84,14 +85,13 @@ def main():
     setup_style()
     table = pd.read_csv(METRICS_FILE)
     models = [m for m in cfg.model_training.models if m in set(table.model)]
-    no_skill_ap = table.positive_share.iloc[0]
 
     fig, axes = plt.subplots(1, len(METRICS), sharey=True,
                              figsize=(cm(cfg.figures.width_cm.full), cm(7.0)),
                              gridspec_kw={"wspace": 0.18, "left": 0.13, "right": 0.99,
                                           "bottom": 0.27, "top": 0.88})
-    for ax, (column, title, ref, start) in zip(axes, METRICS):
-        plot_metric(ax, table, models, column, title, no_skill_ap if ref is None else ref, start)
+    for ax, (column, title) in zip(axes, METRICS):
+        plot_metric(ax, table, models, column, title)
     axes[0].set_yticks(range(len(models)), [MODELS[m]["label"] for m in models])
     for k, ax in enumerate(axes):
         add_panel_label(ax, k, x=-0.05, y=1.12)

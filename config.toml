@@ -133,6 +133,9 @@ running_mean_years = 10                  # smoothing of yearly time series (cent
 seed   = 107
 split  = { train = 0.65, test = 0.25, validation = 0.10 }   # stratified by the fire label
 models = ["extra_trees", "xgboost", "random_forest"]       # chosen in step 01 (highest peak MCC); used from step 02 on
+# Imbalance correction per model, chosen in step 02 (highest peak MCC): a sampler of
+# utils/resampling.py, or "class_weights" (balanced class weights, no sampler)
+samplers = { extra_trees = "smote", xgboost = "class_weights", random_forest = "rus" }
 
 [model_training.paths.inputs]     # relative to data_dir
 split_data = "indata/training/split_index"   # split index, model matrices and stats/, built by 00_split_data.py
