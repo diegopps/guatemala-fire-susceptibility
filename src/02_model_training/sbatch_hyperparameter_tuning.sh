@@ -38,16 +38,19 @@ declare -A SIZE=( [ros]=large [smote]=large [adasyn]=large
 # and training size, as a function of the number of trees n:
 #   memory (GB) = MEM_BASE + MEM_TREES * n / 100     (data and working arrays + trees)
 #   time limit (min) = MIN_TREES * n / 100, at least 30
-# PLACEHOLDERS, estimated from the step-02 runs (100 trees on the whole train subset);
-# set them from the trial runs (cv JSON files: fit_minutes, tree_nodes, peak_memory_gb).
+# Estimated from the step-02 runs (100 trees on the whole train subset, scaled to 2/3; time
+# with a margin for the slower configurations, e.g. max_features 0.5). Measured for the
+# selected setups: extra trees + SMOTE 84 GB, 17.8 min; XGBoost + class weights 10.5 GB,
+# 1.4 min; random forest + RUS 5.3 GB, seconds. PLACEHOLDERS until checked with the trial
+# runs (cv JSON files: fit_minutes, tree_nodes, peak_memory_gb).
 declare -A MEM_BASE=(  [extra_trees,large]=24 [xgboost,large]=20 [random_forest,large]=32
-                       [extra_trees,full]=16  [xgboost,full]=12  [random_forest,full]=16
-                       [extra_trees,small]=4  [xgboost,small]=4  [random_forest,small]=4 )
-declare -A MEM_TREES=( [extra_trees,large]=30 [xgboost,large]=1  [random_forest,large]=60
+                       [extra_trees,full]=16  [xgboost,full]=10  [random_forest,full]=16
+                       [extra_trees,small]=8  [xgboost,small]=8  [random_forest,small]=8 )
+declare -A MEM_TREES=( [extra_trees,large]=32 [xgboost,large]=1  [random_forest,large]=60
                        [extra_trees,full]=12  [xgboost,full]=1   [random_forest,full]=20
                        [extra_trees,small]=1  [xgboost,small]=1  [random_forest,small]=1 )
-declare -A MIN_TREES=( [extra_trees,large]=45 [xgboost,large]=30 [random_forest,large]=180
-                       [extra_trees,full]=30  [xgboost,full]=20  [random_forest,full]=90
+declare -A MIN_TREES=( [extra_trees,large]=40 [xgboost,large]=30 [random_forest,large]=180
+                       [extra_trees,full]=30  [xgboost,full]=15  [random_forest,full]=90
                        [extra_trees,small]=10 [xgboost,small]=10 [random_forest,small]=10 )
 CV_AT_ONCE=4      # PLACEHOLDER: tasks of one array (model and number of trees) running at the same time
 REFIT_SCALE=3/2   # refit: whole train subset, 3/2 of a CV fit (memory and time)
@@ -106,8 +109,9 @@ submit_prepare() {   # <after>
     if [ -n "$TRIAL" ]; then
         id=$(submit tuning_prepare_trial 16 3 60 "$(dependency "$1")" "python $SCRIPT prepare --trial $FORCE")
     else
-        # PLACEHOLDER resources: neighbour searches of tomek/ncr on 2/3 of the training cell-months
-        id=$(submit tuning_prepare 32 6 240 "$(dependency "$1")" "python $SCRIPT prepare $FORCE")
+        # Resampling of 3 folds per sampler: seconds for ros/smote/adasyn/rus, about 5-10 min
+        # per fold for tomek/ncr (step 02: 3-9 min on all training cell-months, 11 GB with the fit)
+        id=$(submit tuning_prepare 16 3 120 "$(dependency "$1")" "python $SCRIPT prepare $FORCE")
     fi
     echo "prepare: $id" >&2
     [ -n "$id" ] || exit 1
@@ -117,7 +121,8 @@ submit_prepare() {   # <after>
 submit_cv() {   # <model> <after>; prints the job IDs, separated by ":"
     local model=$1 after=$2 out sampler folds size n ids res ID_LIST=()
     if [ -n "$TRIAL" ]; then
-        # PLACEHOLDER resources: all fits of the model on 1% of the cell-months, one after the other
+        # All 303 fits of the model on 1% of the cell-months, one after the other (step-02
+        # trials: 0.6 min per 100-tree fit of extra trees + SMOTE on 3 CPUs; generous limits)
         ID_LIST+=($(submit "tuning_cv_${model}_trial" 44 8 1440 "$(dependency "$after")" \
                     "python $SCRIPT cv $model all all --trial $FORCE"))
         echo "cv $model (trial): ${ID_LIST[0]}" >&2
@@ -145,7 +150,7 @@ submit_cv() {   # <model> <after>; prints the job IDs, separated by ":"
 submit_refit() {   # <model> <after>
     local model=$1 after=$2 out sampler n id
     if [ -n "$TRIAL" ]; then
-        # PLACEHOLDER resources: refit on 1% of the cell-months
+        # Refit on 1% of the cell-months and prediction of 1% of the test cell-months
         id=$(submit "tuning_refit_${model}_trial" 16 3 120 "$(dependency "$after")" \
              "python $SCRIPT refit $model --trial $FORCE")
         echo "refit $model (trial): $id" >&2
