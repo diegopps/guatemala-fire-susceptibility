@@ -1,9 +1,10 @@
 """
-data.py
--------
-Model data of this pipeline: the split of the cell-months into train, test and
-validation subsets, and the model matrices of each subset. Written once by
-00_split_data.py into model_training.paths.inputs.split_data; read by all later steps.
+model_data.py
+-------------
+Model data of the model training (src/02_model_training): the split of the cell-months
+into train, test and validation subsets, and the model matrices of each subset. Written
+once by 00_split_data.py into model_training.paths.inputs.split_data; read by all later
+steps.
 
 Layout:
   split_index.parquet   one row per cell-month: year, month, cell_id, fire, subset
@@ -20,18 +21,16 @@ Each subset keeps the row order of the training set (GCM, year, month, lat, lon)
 of the GCMs of one cell-month are always in the same subset.
 
 Usage:
-    from data import load_subset
+    from model_data import load_subset, cell_month_rows
     train = load_subset("train")          # dict of memory-mapped arrays
     X, y = train["X"], train["y"]
+    rows, y_cm = cell_month_rows(train)   # rows[g, c]: row of cell-month c in GCM g
 """
 
 import json
-import sys
-from pathlib import Path
 
 import numpy as np
 
-sys.path.append(str(Path(__file__).resolve().parents[1] / "utils"))
 from load_config import cfg
 
 DIR = cfg.model_training.paths.inputs.split_data
@@ -72,3 +71,16 @@ def load_subset(subset, arrays=tuple(ARRAYS), mmap=True):
     load_meta()
     return {name: np.load(DIR / subset / f"{name}.npy", mmap_mode="r" if mmap else None)
             for name in arrays}
+
+
+def cell_month_rows(subset):
+    """Rows of each cell-month of a subset in each GCM: (rows, y), with rows[g, c] the row of
+    cell-month c in GCM g and y the fire label of each cell-month. Every GCM lists the same
+    cell-months in the same order (the row order of the training set); this is checked."""
+    gcm = np.asarray(subset["gcm"])
+    rows = np.stack([np.flatnonzero(gcm == g) for g in range(len(cfg.gcms.models))])
+    for name in ["cell_id", "year", "month", "y"]:
+        values = np.asarray(subset[name])[rows]
+        if not (values == values[0]).all():
+            raise ValueError(f"Rows of the GCMs are not aligned by cell-month ({name}).")
+    return rows, np.asarray(subset["y"])[rows[0]]
