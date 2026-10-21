@@ -82,9 +82,13 @@ class CellMonthTable:
     X: np.ndarray           # (cell-months, predictors): standardized GCM-mean predictors
 
 
-def cell_month_table(subset):
-    """Cell-month table of a subset (dict of arrays from model_data.load_subset)."""
+def cell_month_table(subset, cell_months=None):
+    """Cell-month table of a subset (dict of arrays from model_data.load_subset), or of some
+    of its cell-months (indices into the cell-months of model_data.cell_month_rows), then
+    standardized over those cell-months only."""
     rows, y = model_data.cell_month_rows(subset)
+    if cell_months is not None:
+        rows, y = rows[:, cell_months], y[cell_months]
     X = np.zeros((rows.shape[1], subset["X"].shape[1]))
     for gcm_rows in rows:
         X += subset["X"][gcm_rows]

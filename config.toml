@@ -5,7 +5,8 @@
 #   directory named in their section header (files).
 # - The data directory can be overridden with the environment variable FFGT_DATA_DIR.
 # - Year periods are inclusive [first, last] and are returned as Python ranges.
-# - Settings used by a single step (e.g. the tuning search space) stay in that script.
+# - Method settings live here, also those of a single step (e.g. the tuning search spaces);
+#   technical settings (threads, block sizes) stay in the scripts.
 # - A section may hold its own [<section>.paths.raw|inputs|generated|results] tables; they
 #   are resolved like the [paths.*] tables of the same name.
 
@@ -133,17 +134,61 @@ running_mean_years = 10                  # smoothing of yearly time series (cent
 seed   = 107
 split  = { train = 0.65, test = 0.25, validation = 0.10 }   # stratified by the fire label
 models = ["extra_trees", "xgboost", "random_forest"]       # chosen in step 01 (highest peak MCC); used from step 02 on
+# Correction of the class imbalance per model, chosen in step 02 (highest peak MCC,
+# 02_resampling/ranking.csv): a sampler of src/utils/resampling.py (ros, smote, adasyn,
+# rus, tomek, ncr) or "class_weights" (balanced class weights, no sampler); used from step 03 on.
+samplers = { extra_trees = "", xgboost = "", random_forest = "" }
+
+# Hyperparameter tuning (step 03): random search with cross-validation over the training
+# cell-months (all GCM rows of a cell-month in one fold), scored by the peak MCC of each
+# held-out fold. Configuration 0 = the settings of src/utils/models.py (the defaults of
+# steps 01–02); configurations 1..n_iter are drawn from the search space below.
+[model_training.tuning]
+folds  = 3      # stratified by the fire label, seed model_training.seed
+n_iter = 100    # random configurations per model
+seed   = 42     # draws of the configurations (as RandomizedSearchCV with this random_state)
+
+# Search spaces: each configuration draws one value per parameter.
+# max_depth = 0 means no depth limit (None).
+[model_training.tuning.search_space.random_forest]
+n_estimators      = [100, 200, 300, 500]
+max_depth         = [0, 10, 20, 30, 50]
+min_samples_split = [2, 5, 10, 20]
+min_samples_leaf  = [1, 2, 4, 8]
+max_features      = ["sqrt", "log2", 0.3, 0.5]
+bootstrap         = [true, false]
+
+[model_training.tuning.search_space.extra_trees]
+n_estimators          = [100, 200, 300, 500]
+max_depth             = [0, 10, 20, 30, 50]
+min_samples_split     = [2, 5, 10, 20]
+min_samples_leaf      = [1, 2, 4, 8]
+max_features          = ["sqrt", "log2", 0.3, 0.5]
+min_impurity_decrease = [0.0, 0.0001, 0.001, 0.01]
+
+[model_training.tuning.search_space.xgboost]
+n_estimators     = [100, 200, 300, 500]
+max_depth        = [3, 5, 7, 10, 15]
+learning_rate    = [0.01, 0.05, 0.1, 0.2, 0.3]
+subsample        = [0.6, 0.7, 0.8, 0.9, 1.0]
+colsample_bytree = [0.6, 0.7, 0.8, 0.9, 1.0]
+min_child_weight = [1, 3, 5, 10]
+gamma            = [0.0, 0.1, 0.3, 0.5, 1.0]
+reg_alpha        = [0.0, 0.01, 0.1, 1.0]
+reg_lambda       = [0.5, 1.0, 2.0, 5.0]
 
 [model_training.paths.inputs]     # relative to data_dir
 split_data = "indata/training/split_index"   # split index, model matrices and stats/, built by 00_split_data.py
 
 [model_training.paths.generated]  # relative to data_dir — predictions of each step
-model_testing = "predictions/02_model_training/model_testing"
-resampling    = "predictions/02_model_training/resampling"
+model_testing         = "predictions/02_model_training/model_testing"
+resampling            = "predictions/02_model_training/resampling"
+hyperparameter_tuning = "predictions/02_model_training/hyperparameter_tuning"
 
 [model_training.paths.results]    # relative to results_dir
-model_testing = "02_model_training/01_model_testing"
-resampling    = "02_model_training/02_resampling"
+model_testing         = "02_model_training/01_model_testing"
+resampling            = "02_model_training/02_resampling"
+hyperparameter_tuning = "02_model_training/03_hyperparameter_tuning"
 
 # =============================================================================
 # RISK CLASSES

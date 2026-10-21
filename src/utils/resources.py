@@ -24,10 +24,14 @@ def n_cpus():
     return len(os.sched_getaffinity(0))
 
 
+def peak_memory_gb():
+    """Peak memory (resident set) of this process so far, in GB."""
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024**2   # kB on Linux
+
+
 def report_usage():
     """Prints the elapsed time since import and the peak memory of this process."""
     elapsed = time.monotonic() - _START
-    peak_gb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024**2   # kB on Linux
     h, rem = divmod(int(elapsed), 3600)
     print(f"\nResources: {h:d}:{rem // 60:02d}:{rem % 60:02d} elapsed, "
-          f"peak memory {peak_gb:.1f} GB, {n_cpus()} CPUs available")
+          f"peak memory {peak_memory_gb():.1f} GB, {n_cpus()} CPUs available")
