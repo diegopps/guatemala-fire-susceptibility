@@ -14,6 +14,7 @@ label(var, wrap=False)          axis or colour-bar label, e.g. "Mean temperature
 to_display_units(var, values, days)   predictor units -> display units
 SCENARIOS                       label and colour of the climate scenarios (Okabe–Ito colours)
 MODELS                          label, short label and colour of the candidate algorithms
+SAMPLERS                        label, colour and marker of the resampling methods
 lighten(color, amount)          colour mixed with white
 cm(x)                           centimetres -> inches
 add_panel_label(ax, i)          "(a)", "(b)", ... at the top left of an axes
@@ -70,6 +71,18 @@ MODELS = {
     "knn":                 {"label": "k-nearest neighbours", "short": "k-NN", "color": "#D55E00"},
     "naive_bayes":         {"label": "Naive Bayes",          "short": "NB",   "color": "#999999"},
     "decision_tree":       {"label": "Decision tree",        "short": "DT",   "color": "#000000"},
+}
+
+# Resampling methods, keyed as in utils/resampling.py: colours from Paul Tol's muted
+# colour-blind-safe palette (none shared with MODELS); circles for oversampling, squares
+# for undersampling.
+SAMPLERS = {
+    "ros":    {"label": "Random oversampling",         "color": "#332288", "marker": "o"},
+    "smote":  {"label": "SMOTE",                       "color": "#88CCEE", "marker": "o"},
+    "adasyn": {"label": "ADASYN",                      "color": "#44AA99", "marker": "o"},
+    "rus":    {"label": "Random undersampling",        "color": "#882255", "marker": "s"},
+    "tomek":  {"label": "Tomek links",                 "color": "#CC6677", "marker": "s"},
+    "ncr":    {"label": "Neighbourhood cleaning rule", "color": "#DDCC77", "marker": "s"},
 }
 
 

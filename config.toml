@@ -134,10 +134,11 @@ running_mean_years = 10                  # smoothing of yearly time series (cent
 seed   = 107
 split  = { train = 0.65, test = 0.25, validation = 0.10 }   # stratified by the fire label
 models = ["extra_trees", "xgboost", "random_forest"]       # chosen in step 01 (highest peak MCC); used from step 02 on
+
 # Correction of the class imbalance per model, chosen in step 02 (highest peak MCC,
 # 02_resampling/ranking.csv): a sampler of src/utils/resampling.py (ros, smote, adasyn,
 # rus, tomek, ncr) or "class_weights" (balanced class weights, no sampler); used from step 03 on.
-samplers = { extra_trees = "", xgboost = "", random_forest = "" }
+samplers = { extra_trees = "smote", xgboost = "class_weights", random_forest = "rus" }
 
 # Hyperparameter tuning (step 03): random search with cross-validation over the training
 # cell-months (all GCM rows of a cell-month in one fold), scored by the peak MCC of each
