@@ -38,17 +38,20 @@ declare -A SIZE=( [ros]=large [smote]=large [adasyn]=large
 # and training size, as a function of the number of trees n:
 #   memory (GB) = MEM_BASE + MEM_TREES * n / 100     (data and working arrays + trees)
 #   time limit (min) = MIN_TREES * n / 100, at least 30
-# Estimated from the step-02 runs (100 trees on the whole train subset, scaled to 2/3; time
-# with a margin for the slower configurations, e.g. max_features 0.5). Measured for the
-# selected setups: extra trees + SMOTE 84 GB, 17.8 min; XGBoost + class weights 10.5 GB,
-# 1.4 min; random forest + RUS 5.3 GB, seconds. PLACEHOLDERS until checked with the trial
-# runs (cv JSON files: fit_minutes, tree_nodes, peak_memory_gb).
-declare -A MEM_BASE=(  [extra_trees,large]=24 [xgboost,large]=20 [random_forest,large]=32
+# Selected setups (extra trees + SMOTE: large, XGBoost + class weights: full, random forest
+# + RUS: small): set from the trial runs (2026-10-23), which give each configuration's fit
+# time and tree size relative to the defaults, scaled with the full-size defaults of step 02
+# (100 trees, whole train subset: extra trees + SMOTE 84-92 GB, 17.8 min; XGBoost 10.5 GB,
+# 1.4 min; random forest + RUS 5.3 GB). Extra trees: about 40 GB data and working memory,
+# trees up to 23 GB per 100 trees (largest configurations, about 1.1x the defaults); slowest
+# configurations up to 8x the defaults (500 trees). The other combinations are estimates
+# from step 02 only; check them with a trial before using them.
+declare -A MEM_BASE=(  [extra_trees,large]=40 [xgboost,large]=20 [random_forest,large]=32
                        [extra_trees,full]=16  [xgboost,full]=10  [random_forest,full]=16
                        [extra_trees,small]=8  [xgboost,small]=8  [random_forest,small]=8 )
-declare -A MEM_TREES=( [extra_trees,large]=32 [xgboost,large]=1  [random_forest,large]=60
+declare -A MEM_TREES=( [extra_trees,large]=23 [xgboost,large]=1  [random_forest,large]=60
                        [extra_trees,full]=12  [xgboost,full]=1   [random_forest,full]=20
-                       [extra_trees,small]=1  [xgboost,small]=1  [random_forest,small]=1 )
+                       [extra_trees,small]=1  [xgboost,small]=1  [random_forest,small]=0 )
 declare -A MIN_TREES=( [extra_trees,large]=40 [xgboost,large]=30 [random_forest,large]=180
                        [extra_trees,full]=30  [xgboost,full]=15  [random_forest,full]=90
                        [extra_trees,small]=10 [xgboost,small]=10 [random_forest,small]=10 )
