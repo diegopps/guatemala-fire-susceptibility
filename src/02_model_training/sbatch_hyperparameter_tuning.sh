@@ -52,7 +52,9 @@ declare -A MEM_TREES=( [extra_trees,large]=32 [xgboost,large]=1  [random_forest,
 declare -A MIN_TREES=( [extra_trees,large]=40 [xgboost,large]=30 [random_forest,large]=180
                        [extra_trees,full]=30  [xgboost,full]=15  [random_forest,full]=90
                        [extra_trees,small]=10 [xgboost,small]=10 [random_forest,small]=10 )
-CV_AT_ONCE=4      # PLACEHOLDER: tasks of one array (model and number of trees) running at the same time
+# Tasks of one array (model and number of trees) running at the same time. The arrays of a
+# model run side by side, so a model has at most one task per number of trees running (4).
+CV_AT_ONCE=1
 REFIT_SCALE=3/2   # refit: whole train subset, 3/2 of a CV fit (memory and time)
 
 usage() { sed -n '2,21p' "$0"; exit 1; }
@@ -99,8 +101,10 @@ resources() {
     echo "$mem $(cpus_for "$mem") $minutes"
 }
 
-# The project environment, for the helper calls of 03_hyperparameter_tuning.py (no model data)
-activate() { ml miniforge >/dev/null 2>&1; source activate forestFireGT || exit 1; }
+# Helper calls of 03_hyperparameter_tuning.py (no model data), in the project environment.
+# They run in a subshell: sbatch passes the environment of this shell on to the jobs, and an
+# environment activated here would keep the jobs' own "source activate" from taking effect.
+helper() { (ml miniforge >/dev/null 2>&1; source activate forestFireGT || exit 1; python "$SCRIPT" "$@"); }
 
 dependency() { [ -n "$1" ] && echo "--dependency=afterok:$1"; }
 
@@ -127,7 +131,7 @@ submit_cv() {   # <model> <after>; prints the job IDs, separated by ":"
                     "python $SCRIPT cv $model all all --trial $FORCE"))
         echo "cv $model (trial): ${ID_LIST[0]}" >&2
     else
-        out=$(python "$SCRIPT" trees "$model") || exit 1
+        out=$(helper trees "$model") || exit 1
         sampler=$(awk '$1 == "sampler" {print $2}' <<< "$out")
         folds=$(awk '$1 == "folds" {print $2}' <<< "$out")
         size=${SIZE[$sampler]}
@@ -155,9 +159,9 @@ submit_refit() {   # <model> <after>
              "python $SCRIPT refit $model --trial $FORCE")
         echo "refit $model (trial): $id" >&2
     else
-        out=$(python "$SCRIPT" trees "$model") || exit 1
+        out=$(helper trees "$model") || exit 1
         sampler=$(awk '$1 == "sampler" {print $2}' <<< "$out")
-        n=$(python "$SCRIPT" trees "$model" --best) || exit 1
+        n=$(helper trees "$model" --best) || exit 1
         read -r mem cpus minutes <<< "$(resources "$model" "${SIZE[$sampler]}" "$n" "$REFIT_SCALE")"
         id=$(submit "tuning_refit_${model}" "$mem" "$cpus" "$minutes" "$(dependency "$after")" \
              "python $SCRIPT refit $model $FORCE")
@@ -201,11 +205,10 @@ case "$COMMAND" in
               [ ${#RUN_MODELS[@]} -gt 0 ] || usage ;;
     *) usage ;;
 esac
-activate
 
 # Every model needs its imbalance correction (model_training.samplers) before anything is submitted.
 if [ "$COMMAND" != "evaluate" ]; then
-    for model in "${MODELS[@]}"; do python "$SCRIPT" trees "$model" >/dev/null || exit 1; done
+    for model in "${MODELS[@]}"; do helper trees "$model" >/dev/null || exit 1; done
 fi
 
 # A failed submission stops the chain, so that no job starts without its dependency.
