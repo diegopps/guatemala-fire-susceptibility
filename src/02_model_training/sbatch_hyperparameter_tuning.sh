@@ -19,6 +19,8 @@
 #     --trial   1% of the cell-months, small jobs, separate output
 #     --force   recompute output that already exists
 #     --after   JOB_ID: start only after that job has finished successfully
+#     --exclude NODES: never run on these nodes (comma-separated), e.g. a node that fails
+#               every job at once
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -60,14 +62,14 @@ declare -A MIN_TREES=( [extra_trees,large]=40 [xgboost,large]=30 [random_forest,
 CV_AT_ONCE=1
 REFIT_SCALE=3/2   # refit: whole train subset, 3/2 of a CV fit (memory and time)
 
-usage() { sed -n '2,21p' "$0"; exit 1; }
+usage() { sed -n '2,23p' "$0"; exit 1; }
 
 # submit <job name> <memory GB> <CPUs> <time (min)> <extra sbatch options> <commands>; prints the job ID
 submit() {
     local name=$1 mem=$2 cpus=$3 minutes=$4 opts=$5 commands=$6 log qos=short
     [[ "$opts" == *--array* ]] && log="${name}_%A_%a" || log="${name}_%j"
     [ "$minutes" -gt 1440 ] && qos=medium
-    sbatch --parsable $opts <<EOF
+    sbatch --parsable $EXCLUDE $opts <<EOF
 #!/bin/bash
 #SBATCH --job-name=$name
 #SBATCH --partition=standard
@@ -188,12 +190,13 @@ pick() {   # pick <value|all> <allowed ...>: prints the selection, or nothing if
 }
 
 ARGS=()
-TRIAL=""; FORCE=""; AFTER=""
+TRIAL=""; FORCE=""; AFTER=""; EXCLUDE=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --trial) TRIAL="--trial" ;;
         --force) FORCE="--force" ;;
         --after) AFTER="$2"; shift ;;
+        --exclude) [ -n "$2" ] || usage; EXCLUDE="--exclude=$2"; shift ;;
         --*) usage ;;
         *) ARGS+=("$1") ;;
     esac
