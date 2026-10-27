@@ -15,8 +15,8 @@ to_display_units(var, values, days)   predictor units -> display units
 SCENARIOS                       label and colour of the climate scenarios (Okabe–Ito colours)
 MODELS                          label, short label and colour of the candidate algorithms
 SAMPLERS                        label, colour and marker of the resampling methods
-IMBALANCE_LABELS                label of each correction of the class imbalance (samplers
-                                and class weights)
+IMBALANCE_LABELS                each correction of the class imbalance (samplers and class
+                                weights) as written inside a label, e.g. "(class weights)"
 SCORES                          title and no-skill value of the scores of the model training
 score_axis(ax, title)           style of a score panel (title, bottom axis only)
 lighten(color, amount)          colour mixed with white
@@ -89,8 +89,17 @@ SAMPLERS = {
     "ncr":    {"label": "Neighbourhood cleaning rule", "color": "#DDCC77", "marker": "s"},
 }
 
-# Correction of the class imbalance of a model (config model_training.samplers).
-IMBALANCE_LABELS = {"class_weights": "Class weights", **{k: s["label"] for k, s in SAMPLERS.items()}}
+# Correction of the class imbalance of a model (config model_training.samplers), as written
+# inside a label or sentence: lower case except acronyms and names.
+IMBALANCE_LABELS = {
+    "class_weights": "class weights",
+    "ros":           "random oversampling",
+    "smote":         "SMOTE",
+    "adasyn":        "ADASYN",
+    "rus":           "random undersampling",
+    "tomek":         "Tomek links",
+    "ncr":           "neighbourhood cleaning rule",
+}
 
 # Scores of the model training, keyed as the columns of the metrics tables: panel title and
 # no-skill value (None: the fire share, for average precision).

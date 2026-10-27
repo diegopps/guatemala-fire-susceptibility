@@ -13,9 +13,10 @@ correction of the class imbalance (model_training.samplers).
     balanced accuracy and ROC-AUC 0.5, average precision the fire share).
 (b) The search: mean peak MCC over the CV folds of every configuration (grey dots, spread
     vertically at random within the band so that they do not overlap). Black line: the
-    defaults (configuration 0), with their mean ± one standard deviation over the folds
-    shaded; filled circle: the selected configuration, with the same range as error bar.
-(a) is drawn above (b), both over the full width.
+    defaults (configuration 0); filled circle: the selected configuration. Only the means
+    are shown: with 3 folds, a spread over the folds says little.
+(a) is drawn above (b), both over the full width, each with its own legend. Score axes end
+at 1, the upper bound of every score.
 
 Input:  results/<model_training hyperparameter_tuning>/metrics.csv and <model>/cv_summary.csv
 Output: results/mainfigs/02_hyperparameter_tuning.pdf
@@ -89,8 +90,12 @@ def plot_scores(axes, metrics, models):
         start = 0.0 if column == "average_precision" else ref     # axis starts at no skill
         if values:
             ax.set_xlim(start, max(values) + 0.7 * (max(values) - start))
-        ax.xaxis.set_major_locator(plt.MaxNLocator(2))
+        # the axis line and ticks end at 1 (the upper bound of every score); the room beyond
+        # is only for the value labels
+        lo, hi = ax.get_xlim()
+        ax.set_xticks([t for t in plt.MaxNLocator(2).tick_values(lo, min(hi, 1.0)) if lo <= t <= min(hi, 1.0)])
         score_axis(ax, title)
+        ax.spines["bottom"].set_bounds(lo, min(hi, 1.0))
 
 
 def plot_search(ax, models, summaries):
@@ -103,16 +108,12 @@ def plot_search(ax, models, summaries):
                    linewidths=0, zorder=1)
         default = s.loc[0]
         if np.isfinite(default.peak_mcc_mean):
-            span = [i - BAND / 2 - 0.08, i + BAND / 2 + 0.08]
-            ax.fill_betweenx(span, default.peak_mcc_mean - default.peak_mcc_std,
-                             default.peak_mcc_mean + default.peak_mcc_std, color="0.9", lw=0, zorder=0)
-            ax.vlines(default.peak_mcc_mean, *span, color="black", lw=0.9, zorder=2)
+            ax.vlines(default.peak_mcc_mean, i - BAND / 2 - 0.08, i + BAND / 2 + 0.08, color="black",
+                      lw=0.9, zorder=2)
         ranked = s[s["rank"] == 1]
         if len(ranked):
-            best = ranked.iloc[0]
-            ax.errorbar(best.peak_mcc_mean, i, xerr=best.peak_mcc_std, fmt="o", ms=MARKER,
-                        color=color, mec="white", mew=0.4, elinewidth=0.6, capsize=1.2,
-                        capthick=0.6, zorder=3)
+            ax.plot(ranked.iloc[0].peak_mcc_mean, i, "o", ms=MARKER, color=color, mec="white",
+                    mew=0.4, zorder=3)
         if i:
             ax.axhline(i - 0.5, color="0.9", lw=0.5, zorder=0)
     ax.set_ylim(len(models) - 0.5, -0.5)
@@ -121,23 +122,30 @@ def plot_search(ax, models, summaries):
     score_axis(ax, "")
 
 
-def legend_handles():
-    grey = "0.35"
-    return [Line2D([], [], ls="none", marker="o", ms=MARKER, mfc="white", mec=grey, mew=0.8,
+GREY = "0.35"        # neutral colour of the legend markers (the model colours are in the bands)
+
+
+def legend_scores():
+    return [Line2D([], [], ls="none", marker="o", ms=MARKER, mfc="white", mec=GREY, mew=0.8,
                    label="Base (default settings)"),
-            Line2D([], [], ls="none", marker="o", ms=MARKER, color=grey, mec="white", mew=0.4,
-                   label="Tuned (selected configuration)"),
-            Line2D([], [], ls="none", marker="o", ms=2, color="0.65", label="Other configurations"),
-            Line2D([], [], color="black", lw=0.9, label="Default settings (mean ± SD shaded)")]
+            Line2D([], [], ls="none", marker="o", ms=MARKER, color=GREY, mec="white", mew=0.4,
+                   label="Tuned (selected configuration)")]
+
+
+def legend_search():
+    return [Line2D([], [], ls="none", marker="o", ms=2, color="0.65", label="Other configurations"),
+            Line2D([], [], color="black", lw=0.9, label="Default settings"),
+            Line2D([], [], ls="none", marker="o", ms=MARKER, color=GREY, mec="white", mew=0.4,
+                   label="Selected configuration")]
 
 
 def main(trial):
     setup_style()
     metrics, models, summaries = load(trial)
     labels = model_labels(metrics, models)
-    fig = plt.figure(figsize=(cm(cfg.figures.width_cm.full), cm(12.0)))
-    grid = fig.add_gridspec(2, 1, height_ratios=[1.0, 1.0], hspace=0.45,
-                            left=0.22, right=0.98, bottom=0.17, top=0.92)
+    fig = plt.figure(figsize=(cm(cfg.figures.width_cm.full), cm(13.0)))
+    grid = fig.add_gridspec(2, 1, height_ratios=[1.0, 1.0], hspace=0.7,
+                            left=0.22, right=0.98, bottom=0.15, top=0.92)
     scores = grid[0].subgridspec(1, len(SCORES), wspace=0.25)
     ax_scores = [fig.add_subplot(scores[0])]
     ax_scores += [fig.add_subplot(scores[k], sharey=ax_scores[0]) for k in range(1, len(SCORES))]
@@ -152,8 +160,13 @@ def main(trial):
     ax_search.set_yticks(range(len(models)), labels)
     add_panel_label(ax_scores[0], 0, x=-1.25, y=1.12)
     add_panel_label(ax_search, 1, x=-0.27, y=1.02)
-    fig.legend(handles=legend_handles(), loc="lower center", ncol=2, bbox_to_anchor=(0.6, 0.0),
-               handlelength=1.4, columnspacing=1.5, handletextpad=0.4)
+    style = {"handlelength": 1.4, "columnspacing": 1.5, "handletextpad": 0.4}
+    left, right = ax_scores[0].get_position(), ax_scores[-1].get_position()
+    fig.legend(handles=legend_scores(), loc="upper center", ncol=2,
+               bbox_to_anchor=((left.x0 + right.x1) / 2, left.y0 - 0.06), **style)
+    pos = ax_search.get_position()
+    fig.legend(handles=legend_search(), loc="lower center", ncol=3,
+               bbox_to_anchor=((pos.x0 + pos.x1) / 2, 0.0), **style)
     if trial:
         path = tuning.directories(trial)[1] / f"{NAME}.{cfg.figures.format}"
         fig.savefig(path, dpi=cfg.figures.dpi)
