@@ -103,7 +103,7 @@ def plot_search(ax, models, summaries):
     for i, model in enumerate(models):
         s = summaries[model].set_index("config")
         color = MODELS[model]["color"]
-        others = s.drop(index=0).peak_mcc_mean.dropna()
+        others = s[(s.index != 0) & (s["rank"] != 1)].peak_mcc_mean.dropna()
         ax.scatter(others, i + rng.uniform(-BAND / 2, BAND / 2, others.size), s=3, color="0.65",
                    linewidths=0, zorder=1)
         default = s.loc[0]

@@ -46,7 +46,7 @@ import xgboost
 from sklearn.model_selection import ParameterSampler
 
 from load_config import cfg
-from models import build
+from models import LIBRARY_DEFAULTS, build
 import resampling
 
 CLASS_WEIGHTS = "class_weights"
@@ -101,11 +101,14 @@ def estimator(model, config, y, cpus):
 
 def settings(model, config):
     """Values of the search-space parameters in a configuration (for configuration 0 those of
-    models.build(); None = no limit, or the library default where models.py sets none)."""
+    models.build(), or the library default of models.LIBRARY_DEFAULTS where models.py sets
+    none; None = no depth limit)."""
     est, _ = build(model, np.array([0, 1]), 1, balanced=False)
     est.set_params(**config)
     params = est.get_params()
-    return {name: params[name] for name in search_space(model)}
+    defaults = LIBRARY_DEFAULTS.get(model, {})
+    return {name: defaults.get(name) if params[name] is None else params[name]
+            for name in search_space(model)}
 
 
 # =============================================================================

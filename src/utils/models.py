@@ -33,6 +33,14 @@ SEED = 42
 MODELS = ("logistic_regression", "decision_tree", "random_forest", "gradient_boosting",
           "xgboost", "extra_trees", "knn", "naive_bayes")
 
+# Library defaults of parameters that build() leaves unset and get_params() reports as None
+# (XGBoost 3.0.4, read from the booster's configuration). Reference values for the tables
+# only; build() does not pass them.
+LIBRARY_DEFAULTS = {
+    "xgboost": {"max_depth": 6, "learning_rate": 0.3, "subsample": 1.0, "colsample_bytree": 1.0,
+                "min_child_weight": 1, "gamma": 0.0, "reg_alpha": 0.0, "reg_lambda": 1.0},
+}
+
 
 def build(name, y, cpus, balanced=True):
     """(estimator, keyword arguments of fit) for training labels y and a number of CPUs."""
