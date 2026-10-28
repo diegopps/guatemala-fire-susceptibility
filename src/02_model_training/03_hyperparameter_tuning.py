@@ -81,6 +81,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1] / "utils"))
 from load_config import cfg
 from classification_metrics import scores
 from resources import n_cpus, peak_memory_gb, report_usage
+import fitting
 import model_data
 import resampling
 import tuning
@@ -89,7 +90,6 @@ MODELS = cfg.model_training.models
 N_FOLDS = cfg.model_training.tuning.folds
 MAX_THREADS = 16
 TRIAL_FRACTION = 0.01
-PREDICT_BLOCK = 1_000_000   # rows per predict_proba call
 
 
 def save_npy(path, array):
@@ -108,34 +108,6 @@ def save_json(path, data):
 
 def counts(y):
     return {"fire": int(y.sum()), "no_fire": int(y.size - y.sum())}
-
-
-def predict_rows(model, X_all, rows):
-    """Fire probability of the given rows of a predictor matrix (float32)."""
-    prob = np.empty(rows.size, dtype=np.float32)
-    for start in range(0, rows.size, PREDICT_BLOCK):
-        block = rows[start:start + PREDICT_BLOCK]
-        prob[start:start + block.size] = model.predict_proba(np.asarray(X_all[block]))[:, 1]
-    return prob
-
-
-def tree_nodes(model):
-    """Nodes of all trees of a forest (the size of the fitted model); None otherwise."""
-    if hasattr(model, "estimators_"):
-        return int(sum(tree.tree_.node_count for tree in model.estimators_))
-    return None
-
-
-def fit(model_name, config, train, rows, res, cpus):
-    """Fits a configuration on the resampled training cell-months (rows: their rows in each
-    GCM); returns the model, the training size and the fit time."""
-    X, y = resampling.training_rows(train, rows, res)
-    model, fit_kwargs = tuning.estimator(model_name, config, y, cpus)
-    t0 = time.monotonic()
-    model.fit(X, y, **fit_kwargs)
-    info = {"train_rows": len(y), "train_fire_rows": int(y.sum()), "cpus": cpus,
-            "fit_minutes": round((time.monotonic() - t0) / 60, 3)}
-    return model, info
 
 
 # =============================================================================
@@ -235,16 +207,17 @@ def cv(model_name, config_arg, fold_arg, threads, trial, force):
             res = resampling.Resampled(np.arange(fit_cms.size))
         else:
             res = tuning.load_resampled(tuning.resampled_file(sampler, k, trial))
-        model, info = fit(model_name, configs[c], train, rows[:, fit_cms], res, cpus)
+        model, info = fitting.fit(model_name, configs[c], train, rows[:, fit_cms], res, cpus)
 
         t0 = time.monotonic()
         held_rows = rows[:, held_out]
-        prob = predict_rows(model, train["X"], held_rows.ravel()).reshape(held_rows.shape)
+        prob = fitting.predict_rows(model, train["X"], held_rows.ravel()).reshape(held_rows.shape)
         s = scores(y[held_out], prob.astype(np.float64).mean(axis=0))
         record = {"model": model_name, "config": c, "fold": k, "sampler": sampler, "trial": trial,
                   "params": configs[c], **s, **info,
                   "predict_minutes": round((time.monotonic() - t0) / 60, 3),
-                  "tree_nodes": tree_nodes(model), "peak_memory_gb": round(peak_memory_gb(), 2)}
+                  "tree_nodes": fitting.tree_nodes(model),
+                  "peak_memory_gb": round(peak_memory_gb(), 2)}
         save_json(tuning.cv_file(model_name, c, k, trial), record)
         print(f"  config {c:3d}, fold {k}: peak MCC {s['peak_mcc']:.4f}, AP {s['average_precision']:.4f}, "
               f"fit {info['fit_minutes']:.1f} min, {record['predict_minutes']:.1f} min predict, "
@@ -289,15 +262,9 @@ def refit(model_name, threads, trial, force):
     train = model_data.load_subset("train")
     fit_cms = tuning.training_cell_months(tuning.load_folds(trial))
     t0 = time.monotonic()
-    if sampler == tuning.CLASS_WEIGHTS:
-        rows, _ = model_data.cell_month_rows(train)
-        rows, res = rows[:, fit_cms], resampling.Resampled(np.arange(fit_cms.size))
-    else:
-        table = resampling.cell_month_table(train, fit_cms)
-        rows, res = table.rows, resampling.resample(sampler, table, cpus)
-        del table
+    rows, res = fitting.training_data(model_name, train, fit_cms, cpus)
     resample_minutes = round((time.monotonic() - t0) / 60, 2)
-    model, info = fit(model_name, params, train, rows, res, cpus)
+    model, info = fitting.fit(model_name, params, train, rows, res, cpus)
     print(f"  fitted on {info['train_rows']:,} rows ({info['train_fire_rows']:,} fire) "
           f"in {info['fit_minutes']:.1f} min, {cpus} CPUs")
     del train, rows, res
@@ -311,7 +278,7 @@ def refit(model_name, threads, trial, force):
         test_rows = np.sort(cm_rows[:, keep].ravel())
     prob = np.full(len(test["y"]), np.nan, dtype=np.float32)
     t0 = time.monotonic()
-    prob[test_rows] = predict_rows(model, test["X"], test_rows)
+    prob[test_rows] = fitting.predict_rows(model, test["X"], test_rows)
     predict_minutes = round((time.monotonic() - t0) / 60, 2)
     gen.mkdir(parents=True, exist_ok=True)
     save_npy(out, prob)
@@ -321,7 +288,7 @@ def refit(model_name, threads, trial, force):
                   "estimator": repr(model), "seed_folds": cfg.model_training.seed,
                   "seed_sampler": resampling.SEED, "trial": trial, **info,
                   "resample_minutes": resample_minutes, "predict_minutes": predict_minutes,
-                  "predicted_rows": int(test_rows.size), "tree_nodes": tree_nodes(model),
+                  "predicted_rows": int(test_rows.size), "tree_nodes": fitting.tree_nodes(model),
                   "packages": tuning.package_versions()}
     save_json(res_dir / model_name / "model_info.json", model_info)
     print(f"  Saved: {res_dir / model_name}/selection.json, model_info.json")

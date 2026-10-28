@@ -17,7 +17,7 @@
 [paths]
 data_dir    = "data"      # symlink to project storage
 results_dir = "results"
-models_dir  = "models"
+models_dir  = "models"    # relative to data_dir — fitted final models (large), see [model_training.final_models]
 manifest    = "data_manifest.csv"   # checksums of the pipeline inputs, written by src/write_data_manifest.py
 
 [paths.raw]               # relative to data_dir — raw inputs of src/00_preprocessing
@@ -178,6 +178,25 @@ gamma            = [0.0, 0.1, 0.3, 0.5, 1.0]
 reg_alpha        = [0.0, 0.01, 0.1, 1.0]
 reg_lambda       = [0.5, 1.0, 2.0, 5.0]
 
+# Final models (step 04): the selected configuration of each model (step 03) refitted on the
+# whole train subset; one decision threshold per model, the peak MCC on the test
+# cell-months, never changed on the validation subset.
+[model_training.final_models]
+seed                = 42             # bootstrap resamples and permutations
+bootstrap_resamples = 1000           # of the validation cell-months, for 95% intervals of the scores
+topk_percent        = [1, 2, 5, 10]  # share of validation cell-months flagged, ranked by probability
+permutation_repeats = 5              # permutation importance on the validation subset
+
+# Permutation importance: the predictors of a group are permuted together (whole cell-months,
+# all GCM rows); then each predictor of a group with more than one, alone. Every predictor of
+# data.features in exactly one group.
+[model_training.final_models.importance_groups]
+temperature = ["tas", "tasmax", "tasmin"]
+water       = ["pr", "climbal", "PET"]
+radiation   = ["rsds"]
+terrain     = ["elev", "slope", "aspect_sin", "aspect_cos"]
+distances   = ["distRoads", "distUrban", "distWater"]
+
 [model_training.paths.inputs]     # relative to data_dir
 split_data = "indata/training/split_index"   # split index, model matrices and stats/, built by 00_split_data.py
 
@@ -185,11 +204,13 @@ split_data = "indata/training/split_index"   # split index, model matrices and s
 model_testing         = "predictions/02_model_training/model_testing"
 resampling            = "predictions/02_model_training/resampling"
 hyperparameter_tuning = "predictions/02_model_training/hyperparameter_tuning"
+final_models          = "predictions/02_model_training/final_models"
 
 [model_training.paths.results]    # relative to results_dir
 model_testing         = "02_model_training/01_model_testing"
 resampling            = "02_model_training/02_resampling"
 hyperparameter_tuning = "02_model_training/03_hyperparameter_tuning"
+final_models          = "02_model_training/04_final_models"
 
 # =============================================================================
 # RISK CLASSES

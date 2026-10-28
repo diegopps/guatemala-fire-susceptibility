@@ -57,7 +57,7 @@ def load(path=CONFIG_FILE):
     data_dir = Path(os.environ.get("FFGT_DATA_DIR", PROJECT_DIR / paths.data_dir))
     paths.data_dir = data_dir
     paths.results_dir = PROJECT_DIR / paths.results_dir
-    paths.models_dir = PROJECT_DIR / paths.models_dir
+    paths.models_dir = data_dir / paths.models_dir
     paths.manifest = PROJECT_DIR / paths.manifest
     _resolve_paths(paths, data_dir, paths.results_dir)
     for name, table in cfg.items():
