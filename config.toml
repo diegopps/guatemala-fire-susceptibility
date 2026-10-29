@@ -217,7 +217,7 @@ risk_maps             = "02_model_training/05_risk_maps"
 # RISK CLASSES
 # =============================================================================
 # Fire-susceptibility classes (step 05, 05_risk_maps.py; stage 3): equal-area classes of the
-# fire-season mean probability of each final model over the training years (Verde and
+# whole-year mean probability of each final model over the training years (Verde and
 # Zêzere, 2010); the breaks are frozen there and applied unchanged to every other map.
 
 [risk_classes]

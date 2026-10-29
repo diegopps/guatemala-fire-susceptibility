@@ -1,19 +1,19 @@
 """
 05_risk_maps_plot.py
 --------------------
-Maps of the fire-susceptibility classes of the final models (tables of 05_risk_maps.py).
+Monthly maps of the fire-susceptibility classes of the final models (tables of
+05_risk_maps.py): the mean probability of each calendar month over the training years,
+classified with the frozen whole-year breaks of each model (equal-area quintiles of its mean
+probability over all months of the training years).
 
-Main figure (results/mainfigs/02_risk_maps.pdf, full width): the fire-season classes of
-each model (model_training.models order), and per cell the median of the three classes.
-Classes from the frozen breaks of each model (equal-area quintiles of its fire-season mean
-probability over the training years).
-
-Appendix (results/appendix/02_risk_maps_monthly_<model>.pdf, one per model): the mean of
-each calendar month over the training years, classified with the same fire-season breaks.
+Main figure (results/mainfigs/02_risk_maps_monthly.pdf, full width): per cell and month the
+median class of the three models.
+Appendix (results/appendix/02_risk_maps_monthly_<model>.pdf, one per model): the classes of
+each model.
 
 Cells outside the pipeline's cell set (lakes) are left blank.
 
-Input:  results/<model_training risk_maps>/cells.parquet, cell_months.parquet
+Input:  results/<model_training risk_maps>/cell_months.parquet
 Output: the figures above
 
 Usage:
@@ -35,13 +35,13 @@ from matplotlib.patches import Patch
 sys.path.append(str(Path(__file__).resolve().parents[1] / "utils"))
 from load_config import cfg
 from chelsa_grid import reference_grid
-from figures import MODELS as MODEL_STYLE, add_panel_label, cm, save_figure, setup_style
-from maps import (COUNTRY_LINE, DEPARTMENT_LINE, add_scale_bar, cells_to_raster,
-                  draw_boundaries, draw_raster, map_extent, setup_map)
+from figures import cm, save_figure, setup_style
+from maps import (COUNTRY_LINE, DEPARTMENT_LINE, cells_to_raster, draw_boundaries, draw_raster,
+                  map_extent, setup_map)
 
 MODELS = cfg.model_training.models
 IN_DIR = cfg.model_training.paths.results.risk_maps
-NAME = "02_risk_maps"
+NAME = "02_risk_maps_monthly"
 LABELS = cfg.risk_classes.labels
 
 # ColorBrewer YlOrRd (5 classes): sequential, colour-blind safe.
@@ -87,34 +87,8 @@ def border_handles():
             Line2D([], [], label="Department border", **DEPARTMENT_LINE)]
 
 
-def main_figure(grid, cells):
-    fig_w = cfg.figures.width_cm.full
-    fig_h, rects = panel_grid(fig_w, 2, 2, left=1.1, right=0.2, top=0.5, bottom=1.6,
-                              wgap=0.5, hgap=0.6)
-    fig = plt.figure(figsize=(cm(fig_w), cm(fig_h)))
-    panels = [(f"{m}_class", MODEL_STYLE[m]["label"]) for m in MODELS]
-    panels.append(("median_class", "Median of the three models"))
-    for i, (rect, (column, text)) in enumerate(zip(rects, panels)):
-        ax = fig.add_axes(rect)
-        draw_map(ax, grid, cells.cell_id, cells[column], CLASS_CMAP, left=i % 2 == 0,
-                 bottom=i >= 2)
-        add_panel_label(ax, i)
-        ax.text(0.075, 1.02, text, transform=ax.transAxes, ha="left", va="bottom")
-        if i == 0:
-            add_scale_bar(ax, length_km=100, x=0.62, y=0.04)
-
-    y = 0.95 / fig_h
-    fig.legend(handles=class_handles(), title="Fire susceptibility (fire season)", ncol=5,
-               loc="upper left", bbox_to_anchor=(1.1 / fig_w, y), handlelength=1.2,
-               handleheight=0.9, columnspacing=1.0, borderaxespad=0,
-               title_fontsize=cfg.figures.font_size)
-    fig.legend(handles=border_handles(), ncol=1, loc="upper right",
-               bbox_to_anchor=(1 - 0.2 / fig_w, y), handlelength=1.6, borderaxespad=0)
-    save_figure(fig, NAME)
-    plt.close(fig)
-
-
-def monthly_figure(grid, months, model):
+def monthly_figure(grid, months, column, name, appendix):
+    """12 calendar-month maps (3 x 4) of one class column of cell_months.parquet."""
     fig_w = cfg.figures.width_cm.full
     fig_h, rects = panel_grid(fig_w, 3, 4, left=1.1, right=0.2, top=0.4, bottom=1.4,
                               wgap=0.3, hgap=0.45)
@@ -122,24 +96,23 @@ def monthly_figure(grid, months, model):
     for m, rect in enumerate(rects, start=1):
         ax = fig.add_axes(rect)
         sub = months[months.month == m]
-        draw_map(ax, grid, sub.cell_id, sub[f"{model}_class"], CLASS_CMAP,
+        draw_map(ax, grid, sub.cell_id, sub[column], CLASS_CMAP,
                  left=(m - 1) % 4 == 0, bottom=m > 8, step=2)
         ax.text(0.0, 1.02, calendar.month_name[m], transform=ax.transAxes, ha="left", va="bottom")
     fig.legend(handles=class_handles() + border_handles(), ncol=7, loc="upper center",
                bbox_to_anchor=(0.5, 0.7 / fig_h), handlelength=1.2, handleheight=0.9,
                columnspacing=1.0, borderaxespad=0)
-    save_figure(fig, f"{NAME}_monthly_{model}", appendix=True)
+    save_figure(fig, name, appendix=appendix)
     plt.close(fig)
 
 
 def main():
     setup_style()
     grid = reference_grid()
-    cells = pd.read_parquet(IN_DIR / "cells.parquet")
     months = pd.read_parquet(IN_DIR / "cell_months.parquet")
-    main_figure(grid, cells)
+    monthly_figure(grid, months, "median_class", NAME, appendix=False)
     for model in MODELS:
-        monthly_figure(grid, months, model)
+        monthly_figure(grid, months, f"{model}_class", f"{NAME}_{model}", appendix=True)
 
 
 if __name__ == "__main__":

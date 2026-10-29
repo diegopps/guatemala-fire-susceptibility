@@ -6,13 +6,12 @@ per-cell susceptibility, the frozen class breaks, the classes of every cell, and
 agreement between the models. 05_risk_maps_plot.py draws the maps.
 
 Susceptibility of a cell (the one definition used here and in stage 3): the mean fire
-probability of the final model over the 9 GCMs and all fire-season months
-(fire_season.months) of the training years (training.years). The months are calendar months
-of those years, not contiguous seasons (2017 and 2023 are not in the data). The predictions
-are those of 04_final_models.py for every row of the train, test and validation subsets, so
-every cell-month of the training years enters; the train rows are in-sample, as in any
-susceptibility map. No score is computed here: the performance of the models is that of the
-validation subset (04_final_models_evaluate.py).
+probability of the final model over the 9 GCMs and all months of the training years
+(training.years), i.e. the whole year. The predictions are those of 04_final_models.py for
+every row of the train, test and validation subsets, so every cell-month of the training
+years enters; the train rows are in-sample, as in any susceptibility map. No score is
+computed here: the performance of the models is that of the validation subset
+(04_final_models_evaluate.py).
 
 Classes (utils/risk_thresholds.py, config risk_classes): the breaks are the percentiles
 risk_classes.quintiles of the susceptibility of all cells, one set per model, so each class
@@ -24,13 +23,13 @@ mask), so each class is 20% of the national territory.
 
 Monthly means: the same mean for each calendar month, classified with the same breaks.
 
-Agreement between two models (fire-season classes of all cells): share of cells in the same
+Agreement between two models (whole-year classes of all cells): share of cells in the same
 class, share within one class, and Cohen's kappa with quadratic weights (classes are
 ordered); and, per cell, the number of models placing it in risk_classes.high_risk.
 
-Median class: per cell, the median of the fire-season classes of the models (the middle one
+Median class: per cell, the median of the whole-year classes of the models (the middle one
 of the sorted classes; model_training.models has an odd number of models), the class the
-models agree on.
+models agree on; likewise per cell and calendar month.
 
 Checks: every cell has the same number of rows in every calendar month (years x GCMs), so
 each mean weighs every cell-month and GCM equally; the breaks are strictly ascending; class
@@ -46,8 +45,8 @@ Output: results/<model_training risk_maps>/
                               (<model>) and its class (<model>_class); n_models_high;
                               median_class
           cell_months.parquet per cell and calendar month: cell_id, month; per model the mean
-                              probability and its class
-          classes.csv         per model and map (fire_season, month 1-12): cells and share of
+                              probability and its class; median_class
+          classes.csv         per model and map (year, month_1-12): cells and share of
                               the cells per class, range of the values
           agreement.csv       per pair of models: same class, within one class, weighted kappa
                               (+ one row per number of models in High or Very high)
@@ -75,7 +74,6 @@ from risk_thresholds import BREAKS_FILE, classify, quintile_breaks
 MODELS = cfg.model_training.models
 PRED_DIR = cfg.model_training.paths.generated.final_models
 OUT_DIR = cfg.model_training.paths.results.risk_maps
-SEASON = cfg.fire_season.months
 LABELS = cfg.risk_classes.labels
 MONTHS = 12
 
@@ -120,7 +118,7 @@ def class_rows(model, map_name, values, classes):
 
 
 def agreement(classes):
-    """Pairwise agreement of the fire-season classes, and cells per number of models in
+    """Pairwise agreement of the whole-year classes, and cells per number of models in
     risk_classes.high_risk."""
     rows = []
     for a, b in itertools.combinations(classes, 2):
@@ -143,12 +141,11 @@ def agreement(classes):
 def main():
     cells, keys, rows_per_key = cell_month_keys()
     grid = reference_grid()
-    season = np.array(SEASON) - 1
     cell_table = pd.DataFrame({"cell_id": cells, "lat": grid.lat[cells // grid.lon.size],
                                "lon": grid.lon[cells % grid.lon.size]})
     month_table = pd.DataFrame({"cell_id": np.repeat(cells, MONTHS),
                                 "month": np.tile(np.arange(1, MONTHS + 1), cells.size)})
-    breaks_info, class_table, season_classes = {}, [], {}
+    breaks_info, class_table, year_classes = {}, [], {}
 
     for model in MODELS:
         missing = [s for s in keys if not (PRED_DIR / f"{model}_{s}.npy").exists()]
@@ -156,7 +153,7 @@ def main():
             raise FileNotFoundError(f"{model}: no predictions for {missing} in {PRED_DIR}: run "
                                     f"04_final_models.py (fit, predict) first.")
         means = monthly_means(model, keys, cells.size, rows_per_key)
-        susceptibility = means[:, season].mean(axis=1)
+        susceptibility = means.mean(axis=1)
         breaks = quintile_breaks(susceptibility)
         classes = classify(susceptibility, breaks)
         monthly_classes = classify(means.ravel(), breaks)
@@ -169,8 +166,8 @@ def main():
 
         cell_table[model], cell_table[f"{model}_class"] = susceptibility, classes
         month_table[model], month_table[f"{model}_class"] = means.ravel(), monthly_classes
-        season_classes[model] = classes
-        class_table += class_rows(model, "fire_season", susceptibility, classes)
+        year_classes[model] = classes
+        class_table += class_rows(model, "year", susceptibility, classes)
         for m in range(MONTHS):
             class_table += class_rows(model, f"month_{m + 1}", means[:, m], monthly_classes.reshape(
                 cells.size, MONTHS)[:, m])
@@ -178,21 +175,23 @@ def main():
                               "cells_equal_to_break": ties,
                               "predictions": [str(PRED_DIR / f"{model}_{s}.npy") for s in keys]}
 
-    print("Agreement of the fire-season classes:")
-    agreement_rows, n_high = agreement(season_classes)
+    print("Agreement of the whole-year classes:")
+    agreement_rows, n_high = agreement(year_classes)
     cell_table["n_models_high"] = n_high
     if len(MODELS) % 2 == 0:
         raise ValueError("The median class needs an odd number of models (model_training.models).")
-    median = np.sort(np.stack(list(season_classes.values())), axis=0)[len(MODELS) // 2]
+    median = np.sort(np.stack(list(year_classes.values())), axis=0)[len(MODELS) // 2]
     cell_table["median_class"] = median
     print("Median class: " + ", ".join(f"{LABELS[c - 1]} {(median == c).mean():.1%}"
                                        for c in range(1, len(LABELS) + 1)))
+    month_table["median_class"] = np.sort(month_table[[f"{m}_class" for m in MODELS]].to_numpy(),
+                                          axis=1)[:, len(MODELS) // 2]
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     BREAKS_FILE.write_text(json.dumps({
-        "susceptibility": "mean probability of the final model over the GCMs and the "
-                          "fire-season months of the training years, per cell",
-        "fire_season_months": list(SEASON), "years": list(cfg.training.years),
+        "susceptibility": "mean probability of the final model over the GCMs and all months "
+                          "of the training years (whole year), per cell",
+        "months": list(range(1, MONTHS + 1)), "years": list(cfg.training.years),
         "gcms": list(cfg.gcms.models), "cells": int(cells.size),
         "percentiles": list(cfg.risk_classes.quintiles), "labels": list(LABELS),
         "class_rule": "class = 1 + number of breaks below the value (a value equal to a break "
