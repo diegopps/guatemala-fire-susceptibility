@@ -3,9 +3,11 @@
 ------------------
 Final models: the selected configuration of each selected algorithm (model_training.models;
 step 03, results/<model_training hyperparameter_tuning>/<model>/selection.json) is fitted on
-the whole train subset, saved, and predicts the fire probability of every test and
-validation row (all GCMs). The validation subset is used here for the first time.
-04_final_models_evaluate.py scores the predictions.
+the whole train subset, saved, and predicts the fire probability of every row of the train,
+test and validation subsets (all GCMs). The validation subset is used here for the first
+time. 04_final_models_evaluate.py scores the validation predictions. The train predictions
+are in-sample: they only feed the susceptibility maps of step 05 (with those of test and
+validation, every cell-month of the model years) and are never scored.
 
 Fit: the same procedure as the refit of step 03 (utils/fitting.py): the training cell-months
 are resampled with the sampler of the model (model_training.samplers) or, with
@@ -27,11 +29,14 @@ group with more than one, alone. Each repeat draws one permutation of the valida
 cell-months (seed final_models.seed), used for every group and predictor of that repeat.
 
 Commands:
-  fit <model>           fits the model, saves it, predicts every test and validation row
-                        and commits the threshold
+  fit <model>           fits the model, saves it, predicts every train, test and validation
+                        row and commits the threshold
   fit <model> --check   only compares the saved test predictions with those of the same
                         configuration in steps 01-03 (largest difference per row and per
                         cell-month, peak MCC and threshold of both); fits nothing
+  predict <model>       loads the saved model, predicts the test rows again (they must equal
+                        the saved predictions) and every train row; for models fitted before
+                        fit predicted the train rows
   importance <model>    loads the saved model, predicts the validation rows again (they must
                         equal the saved predictions) and runs the permutations
 
@@ -43,9 +48,9 @@ Output: paths.models_dir/
                             there, training size, seeds, run times, model size, package
                             versions
         model_training.paths.generated.final_models/
-          <model>_test.npy, <model>_validation.npy
+          <model>_train.npy, <model>_test.npy, <model>_validation.npy
                             fire probability of each row (float32, in the row order of the
-                            subset)
+                            subset); train: in-sample, for the maps of step 05 only
           importance_<model>.csv
                             AP of the validation cell-months, unpermuted and per repeat and
                             permuted group or predictor
@@ -55,6 +60,7 @@ Threads: a fit uses at most MAX_THREADS threads (or --threads N), as in steps 02
 
 Usage:
     python 04_final_models.py fit <model> [--threads N] [--force] [--check]
+    python 04_final_models.py predict <model> [--threads N] [--force]
     python 04_final_models.py importance <model> [--threads N] [--force]
 """
 
@@ -83,7 +89,7 @@ MODELS = cfg.model_training.models
 SETTINGS = cfg.model_training.final_models
 GEN = cfg.model_training.paths.generated.final_models
 MAX_THREADS = 16
-MAX_RELOAD_DIFFERENCE = 1e-6   # validation predictions of the saved and the fitted model
+MAX_RELOAD_DIFFERENCE = 1e-6   # predictions of the saved and the fitted model
 
 
 def save_npy(path, array):
@@ -135,6 +141,28 @@ def cell_month_mean(prob, rows):
     return prob[rows].astype(np.float64).mean(axis=0)
 
 
+def load_model(model_name, cpus):
+    """The saved model of 04_final_models.py fit, set to use the given number of CPUs."""
+    for path in (model_file(model_name), info_file(model_name)):
+        if not path.exists():
+            sys.exit(f"{path} not found: run 04_final_models.py fit {model_name} first.")
+    t0 = time.monotonic()
+    model = joblib.load(model_file(model_name))
+    model.set_params(n_jobs=cpus)
+    print(f"Model: {model_name}; loaded in {(time.monotonic() - t0) / 60:.1f} min, {cpus} CPUs")
+    return model
+
+
+def reload_difference(model_name, subset, prob):
+    """Largest difference between the predictions of the loaded model and those saved by fit;
+    an error if it exceeds MAX_RELOAD_DIFFERENCE."""
+    difference = float(np.abs(prob - np.load(prediction_file(model_name, subset))).max())
+    if difference > MAX_RELOAD_DIFFERENCE:
+        raise RuntimeError(f"The saved model predicts the {subset} rows differently from the "
+                           f"fitted one (largest difference {difference:.3g}).")
+    return difference
+
+
 # =============================================================================
 # FIT
 # =============================================================================
@@ -174,7 +202,7 @@ def fit(model_name, threads, force):
 
     GEN.mkdir(parents=True, exist_ok=True)
     predict_minutes = {}
-    for subset in ("test", "validation"):
+    for subset in model_data.SUBSETS:
         data = model_data.load_subset(subset)
         t0 = time.monotonic()
         prob = fitting.predict_rows(model, data["X"], np.arange(len(data["y"])))
@@ -251,6 +279,31 @@ def check(model_name):
 
 
 # =============================================================================
+# PREDICT
+# =============================================================================
+
+def predict(model_name, threads, force):
+    out = prediction_file(model_name, "train")
+    if out.exists() and not force:
+        print(f"{out} exists; use --force to recompute.")
+        return
+    model = load_model(model_name, min(n_cpus(), threads))
+    for subset in ("test", "train"):     # test first: the reload check before the long run
+        data = model_data.load_subset(subset)
+        t0 = time.monotonic()
+        prob = fitting.predict_rows(model, data["X"], np.arange(len(data["y"])))
+        minutes = (time.monotonic() - t0) / 60
+        if subset == "test":
+            difference = reload_difference(model_name, subset, prob)
+            print(f"  predicted {prob.size:,} test rows in {minutes:.1f} min; largest difference "
+                  f"to the saved predictions {difference:.3g}")
+        else:
+            save_npy(out, prob)
+            print(f"  predicted {prob.size:,} train rows in {minutes:.1f} min\n  Saved: {out}")
+    report_usage()
+
+
+# =============================================================================
 # IMPORTANCE
 # =============================================================================
 
@@ -273,14 +326,7 @@ def importance(model_name, threads, force):
     if out.exists() and not force:
         print(f"{out} exists; use --force to recompute.")
         return
-    for path in (model_file(model_name), info_file(model_name)):
-        if not path.exists():
-            sys.exit(f"{path} not found: run 04_final_models.py fit {model_name} first.")
-    cpus = min(n_cpus(), threads)
-    t0 = time.monotonic()
-    model = joblib.load(model_file(model_name))
-    model.set_params(n_jobs=cpus)
-    print(f"Model: {model_name}; loaded in {(time.monotonic() - t0) / 60:.1f} min, {cpus} CPUs")
+    model = load_model(model_name, min(n_cpus(), threads))
 
     validation = model_data.load_subset("validation")
     rows, y = model_data.cell_month_rows(validation)
@@ -288,10 +334,7 @@ def importance(model_name, threads, force):
     X = X_orig.copy()
     all_rows = np.arange(len(X))
     base = fitting.predict_rows(model, X, all_rows)
-    difference = float(np.abs(base - np.load(prediction_file(model_name, "validation"))).max())
-    if difference > MAX_RELOAD_DIFFERENCE:
-        raise RuntimeError(f"The saved model predicts the validation rows differently from the "
-                           f"fitted one (largest difference {difference:.3g}).")
+    difference = reload_difference(model_name, "validation", base)
     ap_base = average_precision_score(y, cell_month_mean(base, rows))
     print(f"  validation: {rows.shape[1]:,} cell-months ({int(y.sum()):,} fire) x {rows.shape[0]} "
           f"GCMs; AP {ap_base:.4f} (largest difference to the saved predictions {difference:.3g})")
@@ -335,10 +378,13 @@ def add_options(p, force=True):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     commands = parser.add_subparsers(dest="command", required=True)
-    p = commands.add_parser("fit", help="fit and save the final model, predict test and validation")
+    p = commands.add_parser("fit", help="fit and save the final model, predict all subsets")
     p.add_argument("model", choices=MODELS)
     p.add_argument("--check", action="store_true",
                    help="only compare the saved test predictions with those of steps 01-03")
+    add_options(p)
+    p = commands.add_parser("predict", help="predict the train rows with the saved model")
+    p.add_argument("model", choices=MODELS)
     add_options(p)
     p = commands.add_parser("importance", help="permutation importance on the validation subset")
     p.add_argument("model", choices=MODELS)
@@ -348,5 +394,7 @@ if __name__ == "__main__":
         check(a.model)
     elif a.command == "fit":
         fit(a.model, a.threads, a.force)
+    elif a.command == "predict":
+        predict(a.model, a.threads, a.force)
     else:
         importance(a.model, a.threads, a.force)

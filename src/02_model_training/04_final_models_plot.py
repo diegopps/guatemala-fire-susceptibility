@@ -1,0 +1,221 @@
+"""
+04_final_models_plot.py
+-----------------------
+Figures of the final models (step 04) on the validation subset, from the tables of
+04_final_models_evaluate.py. Two scopes: all cell-months and those of the fire season
+(fire_season.months).
+
+Main figure 02_final_models_validation.pdf (full width)
+(a) Validation scores per model (one band each, labelled with its correction of the class
+    imbalance): MCC and balanced accuracy at the committed threshold; average precision
+    divided by the fire share (the AP of a model without skill, so that both scopes share one
+    no-skill value); ROC-AUC. Filled circle: all cell-months; open circle: fire season.
+    Whiskers: 95% bootstrap intervals. Dashed lines: the no-skill values (MCC 0, balanced
+    accuracy and ROC-AUC 0.5, AP / fire share 1).
+(b, c) Top-k coverage: share of the fire cell-months among the k% of the cell-months with
+    the highest probability, (b) all cell-months, (c) fire season. Dashed line: a model
+    without skill (captures k%).
+
+Appendix figure 02_final_models_importance.pdf (single column)
+Permutation importance of the predictor groups: decrease of the AP when the predictors of a
+group are permuted, in % of the unpermuted AP of the model; bars: mean over the repeats,
+error bars: standard deviation. Groups sorted by the mean over the models.
+
+Input:  results/<model_training final_models>/metrics.csv, topk.csv, importance.csv
+Output: results/mainfigs/02_final_models_validation.pdf
+        results/appendix/02_final_models_importance.pdf
+
+Usage:
+    python 04_final_models_plot.py
+"""
+
+import calendar
+import sys
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
+
+sys.path.append(str(Path(__file__).resolve().parents[1] / "utils"))
+from load_config import cfg
+from figures import (IMBALANCE_LABELS, MODELS, SCORES, add_panel_label, cm, save_figure,
+                     score_axis, setup_style)
+
+TABLES = cfg.model_training.paths.results.final_models
+NAMES = {"validation": "02_final_models_validation", "importance": "02_final_models_importance"}
+MARKER = 3.6            # marker size (points)
+OFFSET = 0.17           # vertical offset of the two scopes within a model's band
+BAR = 0.26              # height of a model's bar in the importance figure (groups are 1 apart)
+GREY = "0.35"           # neutral colour of the legend markers
+LEGEND = {"handlelength": 1.4, "columnspacing": 1.5, "handletextpad": 0.4}
+
+# Scores of panel (a), keyed as the columns of metrics.csv: title and no-skill value
+VALIDATION_SCORES = {
+    "mcc":               ("MCC",                 0.0),
+    "balanced_accuracy": SCORES["balanced_accuracy"],
+    "ap_lift":           ("Average precision /\nfire share", 1.0),
+    "roc_auc":           SCORES["roc_auc"],
+}
+SCOPE_STYLE = {"all": {"mfc": None, "dy": -OFFSET}, "fire_season": {"mfc": "white", "dy": OFFSET}}
+
+
+def season_label():
+    months = cfg.fire_season.months
+    return f"Fire season ({calendar.month_abbr[months[0]]}–{calendar.month_abbr[months[-1]]})"
+
+
+SCOPE_LABELS = {"all": "All months", "fire_season": season_label()}
+
+
+def model_labels(models):
+    return [f"{MODELS[m]['label']}\n({IMBALANCE_LABELS[cfg.model_training.samplers[m]]})"
+            for m in models]
+
+
+# =============================================================================
+# MAIN FIGURE: VALIDATION SCORES AND TOP-K COVERAGE
+# =============================================================================
+
+def plot_scores(axes, metrics, models):
+    for ax, (column, (title, ref)) in zip(axes, VALIDATION_SCORES.items()):
+        ax.axvline(ref, color="0.6", lw=0.5, ls="--", zorder=0)
+        highs = []
+        for i, model in enumerate(models):
+            color = MODELS[model]["color"]
+            for scope, style in SCOPE_STYLE.items():
+                row = metrics[(metrics.model == model) & (metrics.scope == scope)]
+                if row.empty:
+                    continue
+                row, y = row.iloc[0], i + style["dy"]
+                ax.hlines(y, row[f"{column}_low"], row[f"{column}_high"], color=color, lw=0.8,
+                          zorder=1)
+                ax.plot(row[column], y, "o", ms=MARKER, mfc=style["mfc"] or color, mec=color,
+                        mew=0.8, zorder=2)
+                highs.append(row[f"{column}_high"])
+            if i:
+                ax.axhline(i - 0.5, color="0.9", lw=0.5, zorder=0)
+        start = min(ref, 0.0) if column == "ap_lift" else ref    # AP / fire share from 0
+        if highs:
+            end = max(highs) + 0.15 * (max(highs) - start)
+            ax.set_xlim(start, min(end, 1.0) if column != "ap_lift" else end)
+        ax.xaxis.set_major_locator(plt.MaxNLocator(3))
+        score_axis(ax, title)
+
+
+def plot_topk(axes, topk, models):
+    ks = sorted(topk.k_percent.unique())
+    for ax, scope in zip(axes, SCOPE_LABELS):
+        ax.plot([0, max(ks)], [0, max(ks)], color="0.6", lw=0.5, ls="--", zorder=0)
+        for model in models:
+            rows = topk[(topk.model == model) & (topk.scope == scope)].sort_values("k_percent")
+            ax.plot(rows.k_percent, 100 * rows.fire_captured_share, "-o", ms=MARKER - 0.8,
+                    lw=0.8, color=MODELS[model]["color"], mec="white", mew=0.3, zorder=2)
+        ax.text(0.04, 0.98, SCOPE_LABELS[scope], transform=ax.transAxes, ha="left", va="top",
+                fontsize=cfg.figures.font_size - 1)
+        ax.set_xticks(ks)
+        ax.set_xlim(0, max(ks) * 1.05)
+        ax.set_ylim(0, 100)
+        ax.yaxis.grid(True, color="0.9", lw=0.5, zorder=0)   # guides to read off the values
+        ax.set_axisbelow(True)
+        ax.set_xlabel("Cell-months flagged (%)")
+        for side in ["top", "right"]:
+            ax.spines[side].set_visible(False)
+    axes[0].set_ylabel("Fire cell-months\ncaptured (%)")
+    for ax in axes[1:]:
+        ax.tick_params(axis="y", labelleft=False)
+
+
+def legend_scopes():
+    return [Line2D([], [], ls="none", marker="o", ms=MARKER, color=GREY, mew=0.8,
+                   label=SCOPE_LABELS["all"]),
+            Line2D([], [], ls="none", marker="o", ms=MARKER, mfc="white", mec=GREY, mew=0.8,
+                   label=SCOPE_LABELS["fire_season"]),
+            Line2D([], [], color=GREY, lw=0.8, label="95% bootstrap interval")]
+
+
+def legend_topk(models):
+    handles = [Line2D([], [], color=MODELS[m]["color"], lw=0.8, marker="o", ms=MARKER - 0.8,
+                      mec="white", mew=0.3, label=MODELS[m]["label"]) for m in models]
+    return handles + [Line2D([], [], color="0.6", lw=0.5, ls="--", label="No skill")]
+
+
+def figure_validation(metrics, topk, models):
+    fig = plt.figure(figsize=(cm(cfg.figures.width_cm.full), cm(12.0)))
+    top = fig.add_gridspec(1, len(VALIDATION_SCORES), wspace=0.25,
+                           left=0.22, right=0.98, bottom=0.62, top=0.92)
+    bottom = fig.add_gridspec(1, 2, wspace=0.08, left=0.22, right=0.98, bottom=0.14, top=0.44)
+    ax_scores = [fig.add_subplot(top[0])]
+    ax_scores += [fig.add_subplot(top[k], sharey=ax_scores[0])
+                  for k in range(1, len(VALIDATION_SCORES))]
+    ax_topk = [fig.add_subplot(bottom[0])]
+    ax_topk.append(fig.add_subplot(bottom[1], sharey=ax_topk[0]))
+
+    plot_scores(ax_scores, metrics, models)
+    for ax in ax_scores[1:]:
+        ax.tick_params(axis="y", labelleft=False)
+    ax_scores[0].set_yticks(range(len(models)), model_labels(models))
+    ax_scores[0].set_ylim(len(models) - 0.5, -0.5)
+    add_panel_label(ax_scores[0], 0, x=-1.25, y=1.12)
+    left, right = ax_scores[0].get_position(), ax_scores[-1].get_position()
+    fig.legend(handles=legend_scopes(), loc="upper center", ncol=3,
+               bbox_to_anchor=((left.x0 + right.x1) / 2, left.y0 - 0.06), **LEGEND)
+
+    plot_topk(ax_topk, topk, models)
+    add_panel_label(ax_topk[0], 1, x=-0.3, y=1.02)
+    add_panel_label(ax_topk[1], 2, x=-0.06, y=1.02)
+    left, right = ax_topk[0].get_position(), ax_topk[-1].get_position()
+    fig.legend(handles=legend_topk(models), loc="lower center", ncol=len(models) + 1,
+               bbox_to_anchor=((left.x0 + right.x1) / 2, 0.0), **LEGEND)
+    return fig
+
+
+# =============================================================================
+# APPENDIX FIGURE: PERMUTATION IMPORTANCE
+# =============================================================================
+
+def figure_importance(importance, models):
+    fig, ax = plt.subplots(figsize=(cm(cfg.figures.width_cm.single), cm(7.0)),
+                           gridspec_kw={"left": 0.25, "right": 0.97, "bottom": 0.3, "top": 0.97})
+    groups = importance[importance.kind == "group"].copy()
+    groups["percent_std"] = 100 * groups.drop_std / groups.average_precision_base
+    order = (groups.groupby("name", sort=False).drop_relative_percent.mean()
+             .sort_values(ascending=False).index)
+    offsets = (np.arange(len(models)) - (len(models) - 1) / 2) * BAR
+    for k, model in enumerate(models):
+        rows = groups[groups.model == model].set_index("name").reindex(order)
+        ax.barh(np.arange(len(order)) + offsets[k], rows.drop_relative_percent, height=BAR,
+                color=MODELS[model]["color"], lw=0, zorder=2)
+        ax.errorbar(rows.drop_relative_percent, np.arange(len(order)) + offsets[k],
+                    xerr=rows.percent_std, fmt="none", ecolor="black", elinewidth=0.5, capsize=1,
+                    capthick=0.5, zorder=3)
+    ax.axvline(0, color="black", lw=0.5, zorder=1)
+    ax.set_yticks(range(len(order)), [g.capitalize() for g in order])
+    ax.set_ylim(len(order) - 0.5, -0.5)
+    ax.set_xlabel("Decrease in average precision when the\ngroup is permuted (% of unpermuted)")
+    ax.xaxis.set_major_locator(plt.MaxNLocator(5))
+    score_axis(ax, "")
+    fig.legend(handles=[Patch(color=MODELS[m]["color"], lw=0, label=MODELS[m]["label"])
+                        for m in models],
+               loc="lower center", ncol=len(models), bbox_to_anchor=(0.55, 0.0), **LEGEND)
+    return fig
+
+
+def main():
+    setup_style()
+    metrics = pd.read_csv(TABLES / "metrics.csv")
+    topk = pd.read_csv(TABLES / "topk.csv")
+    models = [m for m in cfg.model_training.models if m in set(metrics.model)]
+    save_figure(figure_validation(metrics, topk, models), NAMES["validation"])
+    importance_file = TABLES / "importance.csv"
+    if importance_file.exists():
+        importance = pd.read_csv(importance_file)
+        save_figure(figure_importance(importance, models), NAMES["importance"], appendix=True)
+    else:
+        print(f"{importance_file} not found: no importance figure.")
+
+
+if __name__ == "__main__":
+    main()
