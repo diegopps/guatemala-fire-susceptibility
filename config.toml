@@ -211,12 +211,16 @@ model_testing         = "02_model_training/01_model_testing"
 resampling            = "02_model_training/02_resampling"
 hyperparameter_tuning = "02_model_training/03_hyperparameter_tuning"
 final_models          = "02_model_training/04_final_models"
+risk_maps             = "02_model_training/05_risk_maps"
 
 # =============================================================================
 # RISK CLASSES
 # =============================================================================
+# Fire-susceptibility classes (step 05, 05_risk_maps.py; stage 3): equal-area classes of the
+# fire-season mean probability of each final model over the training years (Verde and
+# Zêzere, 2010); the breaks are frozen there and applied unchanged to every other map.
 
 [risk_classes]
 quintiles  = [20, 40, 60, 80]
 labels     = ["Very low", "Low", "Medium", "High", "Very high"]  # classes 1..5
-high_risk  = [4, 5]               # counted in the future trend (High + Very high)
+high_risk  = [4, 5]               # High + Very high: model agreement (step 05), future trend (stage 3)
