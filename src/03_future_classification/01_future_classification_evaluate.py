@@ -20,8 +20,7 @@ Classes: the period means classified with the frozen breaks of each model
 step 05. The classes of a period are not 20% each: only the surface of step 05 is.
 
 Relative change: 100 x (future / baseline - 1) of the period means of one model, per cell (and
-calendar month); the median over the models for the whole-year maps. Probabilities are not
-calibrated, so the change is in the probability scale of each model and only its relative
+calendar month). Probabilities are not calibrated, so the change is in the probability scale of each model and only its relative
 value is comparable. It is 0 where both means are 0, and infinite where only the baseline is 0
 (the number of these cell-months is printed).
 
@@ -34,9 +33,9 @@ Output: paths.results.future_classification/
                                 baseline and high_share, median, min and max over the GCMs
           class_shares.csv      per model and for the median class (summary), scenario, period,
                                 map (year, month_1-12) and class: cells and share of the cells
-          cells.parquet         per cell: cell_id, lat, lon, baseline_class (median class,
-                                whole year) and change_<scenario>_<period> (median over the
-                                models, whole year)
+          cells.parquet         per cell: cell_id, lat, lon; per model the baseline class
+                                (<model>_baseline_class) and the relative change
+                                (<model>_<scenario>_<period>), whole year
           cell_months.parquet   per cell and calendar month: cell_id, month and <model>_<scenario>
                                 (relative change, periods.end_century)
 
@@ -163,7 +162,7 @@ def main():
                                "lon": grid.lon[cells % grid.lon.size]})
     month_table = pd.DataFrame({"cell_id": np.repeat(cells, MONTHS),
                                 "month": np.tile(np.arange(1, MONTHS + 1), cells.size)})
-    yearly, shares, year_classes, month_classes, year_changes = [], [], {}, {}, {}
+    yearly, shares, year_classes, month_classes = [], [], {}, {}
 
     for model in MODELS:
         rows, means = read_model(model, cells.size, breaks[model])
@@ -178,9 +177,10 @@ def main():
             month_classes.setdefault((scenario, period), []).append(month_class)
             shares += class_rows(model, scenario, period, year_class, month_class)
             if scenario == HIST:
+                cell_table[f"{model}_baseline_class"] = year_class
                 continue
-            year_changes.setdefault((scenario, period), []).append(
-                relative_change(year_mean, base.mean(axis=0)))
+            cell_table[f"{model}_{scenario}_{period}"] = relative_change(
+                year_mean, base.mean(axis=0)).astype(np.float32)
             if period == MONTHLY_PERIOD:
                 change = relative_change(mean, base)
                 month_table[f"{model}_{scenario}"] = change.T.ravel().astype(np.float32)
@@ -192,9 +192,6 @@ def main():
     for (scenario, period), classes in year_classes.items():
         shares += class_rows("median", scenario, period, median_class(classes),
                              median_class(month_classes[scenario, period]))
-    cell_table["baseline_class"] = median_class(year_classes[HIST, BASELINE])
-    for (scenario, period), changes in year_changes.items():
-        cell_table[f"change_{scenario}_{period}"] = np.median(np.stack(changes), axis=0).astype(np.float32)
 
     yearly = pd.DataFrame(yearly)
     OUT_DIR.mkdir(parents=True, exist_ok=True)

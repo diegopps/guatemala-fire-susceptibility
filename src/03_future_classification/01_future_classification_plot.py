@@ -12,8 +12,8 @@ Main figures (results/mainfigs/, full width):
   03_classes_monthly.pdf  Share of the country in each class per calendar month (median class
                           of the models): the baseline, then SSPs in rows and periods in columns,
                           with the class limits of the baseline.
-  03_change_maps.pdf      Whole year: the median class of the baseline, then the relative change
-                          (median over the models), SSPs in rows and periods in columns.
+  03_change_maps.pdf      Whole year, one group of columns per model: the class of the baseline
+                          above, then the relative change, SSPs in rows and periods in columns.
 Appendix (results/appendix/):
   03_change_monthly_<model>_<scenario>.pdf
                           Relative change per calendar month, periods.end_century, one figure
@@ -260,20 +260,43 @@ def classes_figure(shares):
 # =============================================================================
 
 def change_maps_figure(grid, cells):
-    left, bottom, top, wgap, hgap = 1.1, 1.7, 0.4, 0.4, 0.45
-    w = (WIDTH - left - 0.2 - 2 * wgap) / 3
+    left, right, bottom, top, inner, between, hgap = 1.2, 0.1, 1.9, 0.8, 0.1, 0.35, 0.42
+    periods = len(FUTURE_PERIODS)
+    w = ((WIDTH - left - right - (len(MODELS) - 1) * between - len(MODELS) * (periods - 1) * inner)
+         / (len(MODELS) * periods))
     h = w / map_ratio()
-    fig_h = bottom + top + 3 * h + 2 * hgap
+    group_w = periods * w + (periods - 1) * inner
+    rows = len(SSPS) + 1
+    fig_h = bottom + top + rows * h + (rows - 1) * hgap
     fig = plt.figure(figsize=(cm(WIDTH), cm(fig_h)))
-    ax_base, axes = scenario_grid(fig, WIDTH, fig_h, left, bottom, w, h, wgap, hgap)
-    draw_map(ax_base, grid, cells.cell_id, cells.baseline_class, CLASS_CMAP, left=True, bottom=True)
-    for (scenario, period), ax in axes.items():
-        draw_change(ax, grid, cells.cell_id, cells[f"change_{scenario}_{period}"].to_numpy(),
-                    left=False, bottom=scenario == SSPS[-1])
-    fig.legend(handles=class_handles() + border_handles(), loc="upper left",
-               bbox_to_anchor=(left / WIDTH, (bottom + h - 0.2) / fig_h), handlelength=1.2,
-               handleheight=0.9, borderaxespad=0)
-    change_colorbar(fig, [(left + w + wgap) / WIDTH, 0.85 / fig_h, (2 * w + wgap) / WIDTH, 0.28 / fig_h])
+
+    def row_y(r):
+        return bottom + (rows - 1 - r) * (h + hgap)
+
+    def add_map(x, r, text):
+        ax = fig.add_axes([x / WIDTH, row_y(r) / fig_h, w / WIDTH, h / fig_h])
+        ax.text(0, 1.02, text, transform=ax.transAxes, ha="left", va="bottom")
+        return ax
+
+    for m, model in enumerate(MODELS):
+        x0 = left + m * (group_w + between)
+        fig.text((x0 + group_w / 2) / WIDTH, (fig_h - 0.1) / fig_h,
+                 f"({'abc'[m]}) {MODEL_STYLES[model]['label']}", ha="center", va="top")
+        ax = add_map(x0 + (group_w - w) / 2, 0, f"Baseline, {BASELINE.start}–{BASELINE.stop - 1}")
+        draw_map(ax, grid, cells.cell_id, cells[f"{model}_baseline_class"], CLASS_CMAP, left=False,
+                 bottom=False, step=2)
+        for r, scenario in enumerate(SSPS, start=1):
+            for c, period in enumerate(FUTURE_PERIODS):
+                ax = add_map(x0 + c * (w + inner), r, period_label(period))
+                draw_change(ax, grid, cells.cell_id, cells[f"{model}_{scenario}_{period}"].to_numpy(),
+                            left=m == 0 and c == 0, bottom=r == len(SSPS), step=2)
+    for r, scenario in enumerate(SSPS, start=1):
+        fig.text(0.1 / WIDTH, (row_y(r) + h / 2) / fig_h, SCENARIOS[scenario]["label"], rotation=90,
+                 ha="left", va="center")
+    fig.legend(handles=class_handles() + border_handles(), ncol=4, loc="lower left",
+               bbox_to_anchor=(left / WIDTH, 0.25 / fig_h), handlelength=1.2, handleheight=0.9,
+               columnspacing=1.0, borderaxespad=0)
+    change_colorbar(fig, [9.5 / WIDTH, 0.85 / fig_h, 7.2 / WIDTH, 0.28 / fig_h])
     save_figure(fig, "03_change_maps")
     plt.close(fig)
 
