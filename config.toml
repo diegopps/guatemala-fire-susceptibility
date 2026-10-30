@@ -28,12 +28,11 @@ static_vars      = "rawdata/static_vars"                              # static l
 
 [paths.inputs]            # relative to data_dir — model inputs built by src/00_preprocessing
 training_set  = "indata/training/allvars_2018-2024.parquet"  # built by 01_build_training_set.py
-future_inputs = "indata/data_fullfuture_processed"  # <scenario>/ subfolders, see [files]
 boundaries    = "boundaries_shp"                    # Natural Earth 10m admin-1 v5.1.1, see [files]
 
 [paths.generated]         # relative to data_dir — large pipeline outputs kept on project storage
 climate_monthly_gcm = "rawdata/processed/climate_monthly_gcm"  # monthly means per GCM, all scenarios/years, built by 00_aggregate_monthly_gcm.py
-future_predictions = "classified_future"            # <MODEL>/<scenario>/ subfolders, see [files]
+future_predictions  = "predictions/03_future_classification"   # <model>/<gcm>_<scenario>.npy, built by 01_future_classification.py
 
 [paths.results]           # relative to results_dir
 # Paper figures only, named <stage>_<name>.pdf (e.g. 01_climate_trends.pdf); see [figures].
@@ -49,8 +48,6 @@ climate_monthly     = "{var}/{scenario}/chelsaGT_monthly_{var}_{scenario}_{year}
 climate_daily_gcm   = "{gcm}/{scenario}/*/{var}/{var}_CHELSA_ISIMIP3b_BA_{gcm}_*_{scenario}_day_{year}0101-{year}1231.nc"  # glob, under paths.raw.climate_gcms
 climate_monthly_gcm = "{gcm}/{var}/{scenario}/chelsaGT_monthly_{var}_{scenario}_{year}_{gcm}.nc"  # under paths.generated.climate_monthly_gcm
 boundaries          = "ne_10m_admin_1_states_provinces/ne_10m_admin_1_states_provinces.shp"  # under paths.inputs.boundaries
-future_input      = "fullvarset_{scenario}_{year}.csv"
-future_prediction = "{scenario}_{year}_predictions.csv"
 
 # =============================================================================
 # DATA
