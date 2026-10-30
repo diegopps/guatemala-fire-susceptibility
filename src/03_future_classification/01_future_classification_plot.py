@@ -293,7 +293,7 @@ def change_maps_figure(grid, cells):
     for r, scenario in enumerate(SSPS, start=1):
         fig.text(0.1 / WIDTH, (row_y(r) + h / 2) / fig_h, SCENARIOS[scenario]["label"], rotation=90,
                  ha="left", va="center")
-    fig.legend(handles=class_handles() + border_handles(), ncol=4, loc="lower left",
+    fig.legend(handles=class_handles(), ncol=3, loc="lower left",
                bbox_to_anchor=(left / WIDTH, 0.25 / fig_h), handlelength=1.2, handleheight=0.9,
                columnspacing=1.0, borderaxespad=0)
     change_colorbar(fig, [9.5 / WIDTH, 0.85 / fig_h, 7.2 / WIDTH, 0.28 / fig_h])
@@ -317,7 +317,7 @@ def monthly_change_figure(grid, months, model, scenario):
         draw_change(ax, grid, months.cell_id[keep], column[keep], left=c == 0, bottom=r == 2, step=2)
         ax.text(0.0, 1.02, calendar.month_name[m], transform=ax.transAxes, ha="left", va="bottom")
     change_colorbar(fig, [left / WIDTH, 0.85 / fig_h, 0.6, 0.28 / fig_h])
-    fig.legend(handles=border_handles(), loc="lower right", bbox_to_anchor=(0.99, 0.6 / fig_h),
+    fig.legend(handles=border_handles(), loc="lower right", bbox_to_anchor=(0.99, 0.35 / fig_h),
                borderaxespad=0)
     save_figure(fig, f"03_change_monthly_{model}_{scenario}", appendix=True)
     plt.close(fig)

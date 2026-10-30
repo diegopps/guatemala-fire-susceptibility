@@ -19,6 +19,7 @@ import geopandas as gpd
 import matplotlib.ticker as mticker
 import numpy as np
 from matplotlib.patches import Rectangle
+from shapely.geometry import box
 
 from load_config import cfg
 
@@ -78,9 +79,12 @@ def map_extent():
 
 
 def draw_boundaries(ax, departments=True):
-    """Neighbouring countries, Guatemala's departments (optional) and its outline."""
+    """Neighbouring countries (only what the national map shows: their full outlines would be
+    stored in the PDF), Guatemala's departments (optional) and its outline."""
     deps, country, countries = boundaries()
-    countries[countries.admin != COUNTRY].boundary.plot(ax=ax, **NEIGHBOUR_LINE)
+    lon_min, lon_max, lat_min, lat_max = map_extent()
+    (countries[countries.admin != COUNTRY].boundary
+     .clip(box(lon_min, lat_min, lon_max, lat_max)).plot(ax=ax, **NEIGHBOUR_LINE))
     if departments:
         deps.boundary.plot(ax=ax, **DEPARTMENT_LINE)
     country.boundary.plot(ax=ax, **COUNTRY_LINE)

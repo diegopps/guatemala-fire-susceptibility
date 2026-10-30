@@ -42,11 +42,12 @@ N=${#TASKS[@]}
 declare -A RESOURCES=(
     [extra_trees]="42 8 20 3"   [xgboost]="3 2 15 3"   [random_forest]="3 3 20 3"
 )
-# Evaluate and plot: "memory (GB) CPUs time (min)". Estimates, not measured yet: evaluate reads
-# the 108 prediction files one at a time, plot holds the monthly table (1.6M rows).
+# Evaluate and plot: "memory (GB) CPUs time (min)". Measured (2026-10-30, jobs 2792338-2792339):
+# evaluate 1.9 min, 1.0 GB in the process (4.0 GB with the memory-mapped predictions, which the
+# system can release); plot 1.2 min, 0.9 GB.
 declare -A SINGLE_RESOURCES=(
-    [evaluate]="4 1 180"
-    [plot]="8 2 30"
+    [evaluate]="4 1 15"
+    [plot]="2 1 10"
 )
 declare -A SCRIPTS=(
     [evaluate]="01_future_classification_evaluate.py"
