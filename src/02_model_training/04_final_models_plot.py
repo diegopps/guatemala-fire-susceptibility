@@ -2,19 +2,17 @@
 04_final_models_plot.py
 -----------------------
 Figures of the final models (step 04) on the validation subset, from the tables of
-04_final_models_evaluate.py. Two scopes: all cell-months and those of the fire season
-(fire_season.months).
+04_final_models_evaluate.py.
 
 Main figure 02_final_models_validation.pdf (full width)
-(a) Validation scores per model (one band each, labelled with its correction of the class
-    imbalance): MCC and balanced accuracy at the committed threshold; average precision
-    divided by the fire share (the AP of a model without skill, so that both scopes share one
-    no-skill value); ROC-AUC. Filled circle: all cell-months; open circle: fire season.
-    Whiskers: 95% bootstrap intervals. Dashed lines: the no-skill values (MCC 0, balanced
-    accuracy and ROC-AUC 0.5, AP / fire share 1).
+(a) Validation scores per model over all cell-months (labelled with its correction of the
+    class imbalance): MCC and balanced accuracy at the committed threshold; average precision;
+    ROC-AUC. Circles, labelled with their value: the scores; whiskers: 95% bootstrap
+    intervals. Dashed lines: the no-skill values (MCC 0, balanced accuracy and ROC-AUC 0.5,
+    average precision the fire share); the pale stems start there.
 (b, c) Top-k coverage: share of the fire cell-months among the k% of the cell-months with
-    the highest probability, (b) all cell-months, (c) fire season. Dashed line: a model
-    without skill (captures k%).
+    the highest probability, (b) all cell-months, (c) fire season (fire_season.months). Dashed
+    line: a model without skill (captures k%).
 
 Appendix figure 02_final_models_importance.pdf (single column)
 Permutation importance of the predictor groups: decrease of the AP when the predictors of a
@@ -47,19 +45,20 @@ from figures import (IMBALANCE_LABELS, MODELS, SCORES, add_panel_label, cm, save
 TABLES = cfg.model_training.paths.results.final_models
 NAMES = {"validation": "02_final_models_validation", "importance": "02_final_models_importance"}
 MARKER = 3.6            # marker size (points)
-OFFSET = 0.17           # vertical offset of the two scopes within a model's band
 BAR = 0.26              # height of a model's bar in the importance figure (groups are 1 apart)
 GREY = "0.35"           # neutral colour of the legend markers
 LEGEND = {"handlelength": 1.4, "columnspacing": 1.5, "handletextpad": 0.4}
 
-# Scores of panel (a), keyed as the columns of metrics.csv: title and no-skill value
+# Scores of panel (a), keyed as the columns of metrics.csv: title and no-skill value (None:
+# the fire share)
 VALIDATION_SCORES = {
     "mcc":               ("MCC",                 0.0),
     "balanced_accuracy": SCORES["balanced_accuracy"],
-    "ap_lift":           ("Average precision /\nfire share", 1.0),
+    "average_precision": SCORES["average_precision"],
     "roc_auc":           SCORES["roc_auc"],
 }
-SCOPE_STYLE = {"all": {"mfc": None, "dy": -OFFSET}, "fire_season": {"mfc": "white", "dy": OFFSET}}
+SCORE_TICKS = {"mcc": [0, 0.03, 0.06], "balanced_accuracy": [0.5, 0.6],
+               "average_precision": [0, 0.01], "roc_auc": [0.5, 0.7, 0.9]}
 
 
 def season_label():
@@ -80,28 +79,22 @@ def model_labels(models):
 # =============================================================================
 
 def plot_scores(axes, metrics, models):
+    rows = metrics[metrics.scope == "all"].set_index("model").loc[models]
+    y = range(len(models))
+    colors = [MODELS[m]["color"] for m in models]
     for ax, (column, (title, ref)) in zip(axes, VALIDATION_SCORES.items()):
+        values, highs = rows[column], rows[f"{column}_high"]
+        ref = rows.fire_share.iloc[0] if ref is None else ref
         ax.axvline(ref, color="0.6", lw=0.5, ls="--", zorder=0)
-        highs = []
-        for i, model in enumerate(models):
-            color = MODELS[model]["color"]
-            for scope, style in SCOPE_STYLE.items():
-                row = metrics[(metrics.model == model) & (metrics.scope == scope)]
-                if row.empty:
-                    continue
-                row, y = row.iloc[0], i + style["dy"]
-                ax.hlines(y, row[f"{column}_low"], row[f"{column}_high"], color=color, lw=0.8,
-                          zorder=1)
-                ax.plot(row[column], y, "o", ms=MARKER, mfc=style["mfc"] or color, mec=color,
-                        mew=0.8, zorder=2)
-                highs.append(row[f"{column}_high"])
-            if i:
-                ax.axhline(i - 0.5, color="0.9", lw=0.5, zorder=0)
-        start = min(ref, 0.0) if column == "ap_lift" else ref    # AP / fire share from 0
-        if highs:
-            end = max(highs) + 0.15 * (max(highs) - start)
-            ax.set_xlim(start, min(end, 1.0) if column != "ap_lift" else end)
-        ax.xaxis.set_major_locator(plt.MaxNLocator(3))
+        ax.hlines(y, ref, values, color="0.85", lw=0.6, zorder=1)
+        ax.hlines(y, rows[f"{column}_low"], highs, color=colors, lw=0.8, zorder=2)
+        ax.scatter(values, y, c=colors, s=MARKER ** 2, lw=0, zorder=3)
+        for v, yi in zip(values, y):
+            ax.annotate(f"{v:.3f}", (v, yi), xytext=(0, 3.5), textcoords="offset points",
+                        ha="center", va="bottom", fontsize=cfg.figures.font_size - 2)
+        start = 0.0 if column == "average_precision" else ref    # AP from 0, not the fire share
+        ax.set_xlim(start, min(highs.max() + 0.15 * (highs.max() - start), 1.0))
+        ax.set_xticks(SCORE_TICKS[column], [f"{t:g}" for t in SCORE_TICKS[column]])
         score_axis(ax, title)
 
 
@@ -128,11 +121,9 @@ def plot_topk(axes, topk, models):
         ax.tick_params(axis="y", labelleft=False)
 
 
-def legend_scopes():
-    return [Line2D([], [], ls="none", marker="o", ms=MARKER, color=GREY, mew=0.8,
+def legend_scores():
+    return [Line2D([], [], ls="none", marker="o", ms=MARKER, color=GREY, mew=0,
                    label=SCOPE_LABELS["all"]),
-            Line2D([], [], ls="none", marker="o", ms=MARKER, mfc="white", mec=GREY, mew=0.8,
-                   label=SCOPE_LABELS["fire_season"]),
             Line2D([], [], color=GREY, lw=0.8, label="95% bootstrap interval")]
 
 
@@ -160,7 +151,7 @@ def figure_validation(metrics, topk, models):
     ax_scores[0].set_ylim(len(models) - 0.5, -0.5)
     add_panel_label(ax_scores[0], 0, x=-1.25, y=1.12)
     left, right = ax_scores[0].get_position(), ax_scores[-1].get_position()
-    fig.legend(handles=legend_scopes(), loc="upper center", ncol=3,
+    fig.legend(handles=legend_scores(), loc="upper center", ncol=2,
                bbox_to_anchor=((left.x0 + right.x1) / 2, left.y0 - 0.06), **LEGEND)
 
     plot_topk(ax_topk, topk, models)
