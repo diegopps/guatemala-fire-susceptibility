@@ -10,9 +10,9 @@ Main figure 02_final_models_validation.pdf (full width)
     ROC-AUC. Circles, labelled with their value: the scores; whiskers: 95% bootstrap
     intervals. Dashed lines: the no-skill values (MCC 0, balanced accuracy and ROC-AUC 0.5,
     average precision the fire share); the pale stems start there.
-(b, c) Top-k coverage: share of the fire cell-months among the k% of the cell-months with
-    the highest probability, (b) all cell-months, (c) fire season (fire_season.months). Dashed
-    line: a model without skill (captures k%).
+(b) Top-k coverage over all cell-months: share of the fire cell-months among the k% of the
+    cell-months with the highest probability. Dashed line: a model without skill (captures
+    k%).
 
 Appendix figure 02_final_models_importance.pdf (single column)
 Permutation importance of the predictor groups: decrease of the AP when the predictors of a
@@ -27,7 +27,6 @@ Usage:
     python 04_final_models_plot.py
 """
 
-import calendar
 import sys
 from pathlib import Path
 
@@ -48,6 +47,7 @@ MARKER = 3.6            # marker size (points)
 BAR = 0.26              # height of a model's bar in the importance figure (groups are 1 apart)
 GREY = "0.35"           # neutral colour of the legend markers
 LEGEND = {"handlelength": 1.4, "columnspacing": 1.5, "handletextpad": 0.4}
+SCOPE_LABEL = "All months"
 
 # Scores of panel (a), keyed as the columns of metrics.csv: title and no-skill value (None:
 # the fire share)
@@ -59,14 +59,6 @@ VALIDATION_SCORES = {
 }
 SCORE_TICKS = {"mcc": [0, 0.03, 0.06], "balanced_accuracy": [0.5, 0.6],
                "average_precision": [0, 0.01], "roc_auc": [0.5, 0.7, 0.9]}
-
-
-def season_label():
-    months = cfg.fire_season.months
-    return f"Fire season ({calendar.month_abbr[months[0]]}–{calendar.month_abbr[months[-1]]})"
-
-
-SCOPE_LABELS = {"all": "All months", "fire_season": season_label()}
 
 
 def model_labels(models):
@@ -98,32 +90,29 @@ def plot_scores(axes, metrics, models):
         score_axis(ax, title)
 
 
-def plot_topk(axes, topk, models):
+def plot_topk(ax, topk, models):
     ks = sorted(topk.k_percent.unique())
-    for ax, scope in zip(axes, SCOPE_LABELS):
-        ax.plot([0, max(ks)], [0, max(ks)], color="0.6", lw=0.5, ls="--", zorder=0)
-        for model in models:
-            rows = topk[(topk.model == model) & (topk.scope == scope)].sort_values("k_percent")
-            ax.plot(rows.k_percent, 100 * rows.fire_captured_share, "-o", ms=MARKER - 0.8,
-                    lw=0.8, color=MODELS[model]["color"], mec="white", mew=0.3, zorder=2)
-        ax.text(0.04, 0.98, SCOPE_LABELS[scope], transform=ax.transAxes, ha="left", va="top",
-                fontsize=cfg.figures.font_size - 1)
-        ax.set_xticks(ks)
-        ax.set_xlim(0, max(ks) * 1.05)
-        ax.set_ylim(0, 100)
-        ax.yaxis.grid(True, color="0.9", lw=0.5, zorder=0)   # guides to read off the values
-        ax.set_axisbelow(True)
-        ax.set_xlabel("Cell-months flagged (%)")
-        for side in ["top", "right"]:
-            ax.spines[side].set_visible(False)
-    axes[0].set_ylabel("Fire cell-months\ncaptured (%)")
-    for ax in axes[1:]:
-        ax.tick_params(axis="y", labelleft=False)
+    ax.plot([0, max(ks)], [0, max(ks)], color="0.6", lw=0.5, ls="--", zorder=0)
+    for model in models:
+        rows = topk[(topk.model == model) & (topk.scope == "all")].sort_values("k_percent")
+        ax.plot(rows.k_percent, 100 * rows.fire_captured_share, "-o", ms=MARKER - 0.8,
+                lw=0.8, color=MODELS[model]["color"], mec="white", mew=0.3, zorder=2)
+    ax.text(0.02, 0.98, SCOPE_LABEL, transform=ax.transAxes, ha="left", va="top",
+            fontsize=cfg.figures.font_size - 1)
+    ax.set_xticks(ks)
+    ax.set_xlim(0, max(ks) * 1.05)
+    ax.set_ylim(0, 100)
+    ax.yaxis.grid(True, color="0.9", lw=0.5, zorder=0)   # guides to read off the values
+    ax.set_axisbelow(True)
+    ax.set_xlabel("Cell-months flagged (%)")
+    ax.set_ylabel("Fire cell-months\ncaptured (%)")
+    for side in ["top", "right"]:
+        ax.spines[side].set_visible(False)
 
 
 def legend_scores():
     return [Line2D([], [], ls="none", marker="o", ms=MARKER, color=GREY, mew=0,
-                   label=SCOPE_LABELS["all"]),
+                   label=SCOPE_LABEL),
             Line2D([], [], color=GREY, lw=0.8, label="95% bootstrap interval")]
 
 
@@ -137,12 +126,11 @@ def figure_validation(metrics, topk, models):
     fig = plt.figure(figsize=(cm(cfg.figures.width_cm.full), cm(12.0)))
     top = fig.add_gridspec(1, len(VALIDATION_SCORES), wspace=0.25,
                            left=0.22, right=0.98, bottom=0.62, top=0.92)
-    bottom = fig.add_gridspec(1, 2, wspace=0.08, left=0.22, right=0.98, bottom=0.14, top=0.44)
+    bottom = fig.add_gridspec(1, 1, left=0.22, right=0.98, bottom=0.14, top=0.44)
     ax_scores = [fig.add_subplot(top[0])]
     ax_scores += [fig.add_subplot(top[k], sharey=ax_scores[0])
                   for k in range(1, len(VALIDATION_SCORES))]
-    ax_topk = [fig.add_subplot(bottom[0])]
-    ax_topk.append(fig.add_subplot(bottom[1], sharey=ax_topk[0]))
+    ax_topk = fig.add_subplot(bottom[0])
 
     plot_scores(ax_scores, metrics, models)
     for ax in ax_scores[1:]:
@@ -155,11 +143,10 @@ def figure_validation(metrics, topk, models):
                bbox_to_anchor=((left.x0 + right.x1) / 2, left.y0 - 0.06), **LEGEND)
 
     plot_topk(ax_topk, topk, models)
-    add_panel_label(ax_topk[0], 1, x=-0.3, y=1.02)
-    add_panel_label(ax_topk[1], 2, x=-0.06, y=1.02)
-    left, right = ax_topk[0].get_position(), ax_topk[-1].get_position()
+    add_panel_label(ax_topk, 1, x=-0.26, y=1.02)
+    box = ax_topk.get_position()
     fig.legend(handles=legend_topk(models), loc="lower center", ncol=len(models) + 1,
-               bbox_to_anchor=((left.x0 + right.x1) / 2, 0.0), **LEGEND)
+               bbox_to_anchor=((box.x0 + box.x1) / 2, 0.0), **LEGEND)
     return fig
 
 
