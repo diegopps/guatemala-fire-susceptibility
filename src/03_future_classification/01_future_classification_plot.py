@@ -9,9 +9,10 @@ Main figures (results/mainfigs/, full width):
                           figures.running_mean_years complete years, the historical years
                           averaged over the SSP continuations (as 01_data_exploration/
                           03_climate_trends.py).
-  03_classes_monthly.pdf  Share of the country in each class per calendar month (median class
-                          of the models): the baseline, then SSPs in rows and periods in columns,
-                          with the class limits of the baseline.
+  03_classes_monthly.pdf  Share of the country in each class per calendar month, laid out as
+                          03_change_maps.pdf: one group of columns per model (panel labels
+                          (a)–(c)), the baseline above, then SSPs in rows and periods in columns,
+                          with the class limits of the model's baseline.
   03_change_maps.pdf      Whole year, one group of columns per model: the class of the baseline
                           above, then the relative change, SSPs in rows and periods in columns.
 Appendix (results/appendix/):
@@ -87,26 +88,6 @@ def map_ratio():
     """Width / height of a national map (true distances at its mid-latitude)."""
     lon_min, lon_max, lat_min, lat_max = map_extent()
     return (lon_max - lon_min) * np.cos(np.deg2rad((lat_min + lat_max) / 2)) / (lat_max - lat_min)
-
-
-def scenario_grid(fig, fig_w, fig_h, left, bottom, w, h, wgap, hgap):
-    """Axes of the baseline (first column, level with the middle row) and of each (SSP, period):
-    SSPs in rows, periods in columns, with their labels; sizes in cm."""
-    def rect(r, c):
-        return [(left + c * (w + wgap)) / fig_w, (bottom + (len(SSPS) - 1 - r) * (h + hgap)) / fig_h,
-                w / fig_w, h / fig_h]
-
-    baseline = fig.add_axes(rect(1, 0))
-    baseline.text(0, 1.02, f"(a) Baseline, {BASELINE.start}–{BASELINE.stop - 1}",
-                  transform=baseline.transAxes, ha="left", va="bottom")
-    axes, k = {}, 1
-    for r, s in enumerate(SSPS):
-        for c, p in enumerate(FUTURE_PERIODS):
-            ax = axes[s, p] = fig.add_axes(rect(r, c + 1))
-            ax.text(0, 1.02, f"({'abcdefghijklmnopqrstuvwxyz'[k]}) {SCENARIOS[s]['label']}, "
-                             f"{period_label(p)}", transform=ax.transAxes, ha="left", va="bottom")
-            k += 1
-    return baseline, axes
 
 
 def draw_map(ax, grid, cell_id, values, cmap, left, bottom, step=1):
@@ -207,9 +188,9 @@ def national_figure(yearly):
 # MONTHLY CLASSES
 # =============================================================================
 
-def monthly_shares(shares, scenario, period):
-    """Share of the country (%) per calendar month (rows) and class (columns) of the median class."""
-    sub = shares[(shares.summary == "median") & (shares.scenario == scenario) & (shares.period == period)]
+def monthly_shares(shares, model, scenario, period):
+    """Share of the country (%) per calendar month (rows) and class (columns) of one model."""
+    sub = shares[(shares.summary == model) & (shares.scenario == scenario) & (shares.period == period)]
     return 100 * np.array([sub[sub["map"] == f"month_{m}"].sort_values("class").share.to_numpy()
                            for m in range(1, 13)])
 
@@ -230,27 +211,55 @@ def stacked_bars(ax, values, reference=None):
                     linewidth=0.5)
     ax.set_xlim(-0.6, 11.6)
     ax.set_ylim(0, 100)
-    ax.set_xticks(x, [calendar.month_abbr[m + 1][0] for m in x])
+    ax.set_xticks(x[::3], [calendar.month_abbr[m + 1] for m in x[::3]])     # Jan, Apr, Jul, Oct
     ax.yaxis.set_major_locator(mticker.MultipleLocator(25))
     ax.tick_params(axis="x", length=0)
     ax.spines[["top", "right"]].set_visible(False)
 
 
 def classes_figure(shares):
-    left, bottom, top, wgap, hgap, h = 1.1, 0.6, 0.4, 0.5, 0.65, 2.7
-    w = (WIDTH - left - 0.2 - 2 * wgap) / 3
-    fig_h = bottom + top + 3 * h + 2 * hgap
+    """Laid out as change_maps_figure: one group of columns per model, the baseline above, then
+    SSPs in rows and periods in columns; tick labels on the outer panels only."""
+    left, right, bottom, top, inner, between, hgap, h = 1.3, 0.1, 1.0, 0.8, 0.15, 0.4, 0.45, 2.4
+    below_baseline = 0.35     # extra gap: the baseline row has month labels
+    periods = len(FUTURE_PERIODS)
+    w = ((WIDTH - left - right - (len(MODELS) - 1) * between - len(MODELS) * (periods - 1) * inner)
+         / (len(MODELS) * periods))
+    group_w = periods * w + (periods - 1) * inner
+    rows = len(SSPS) + 1
+    fig_h = bottom + top + rows * h + (rows - 1) * hgap + below_baseline
     fig = plt.figure(figsize=(cm(WIDTH), cm(fig_h)))
-    ax_base, axes = scenario_grid(fig, WIDTH, fig_h, left, bottom, w, h, wgap, hgap)
-    reference = monthly_shares(shares, HIST, "baseline")
-    stacked_bars(ax_base, reference)
-    ax_base.set_ylabel("Share of the country (%)")
-    for (scenario, period), ax in axes.items():
-        stacked_bars(ax, monthly_shares(shares, scenario, period), reference)
+
+    def row_y(r):
+        return bottom + (rows - 1 - r) * (h + hgap) + (below_baseline if r == 0 else 0)
+
+    def add_bars(x, r, text, values, reference=None):
+        ax = fig.add_axes([x / WIDTH, row_y(r) / fig_h, w / WIDTH, h / fig_h])
+        stacked_bars(ax, values, reference)
+        ax.text(0, 1.02, text, transform=ax.transAxes, ha="left", va="bottom")
+        return ax
+
+    for m, model in enumerate(MODELS):
+        x0 = left + m * (group_w + between)
+        fig.text((x0 + group_w / 2) / WIDTH, (fig_h - 0.1) / fig_h,
+                 f"({'abc'[m]}) {MODEL_STYLES[model]['label']}", ha="center", va="top")
+        reference = monthly_shares(shares, model, HIST, "baseline")
+        ax = add_bars(x0 + (group_w - w) / 2, 0, f"Baseline, {BASELINE.start}–{BASELINE.stop - 1}",
+                      reference)
+        if m == 0:
+            ax.set_ylabel("Share of the\ncountry (%)")
+        for r, scenario in enumerate(SSPS, start=1):
+            for c, period in enumerate(FUTURE_PERIODS):
+                ax = add_bars(x0 + c * (w + inner), r, period_label(period),
+                              monthly_shares(shares, model, scenario, period), reference)
+                ax.tick_params(labelleft=m == 0 and c == 0, labelbottom=r == len(SSPS))
+    for r, scenario in enumerate(SSPS, start=1):
+        fig.text(0.1 / WIDTH, (row_y(r) + h / 2) / fig_h, SCENARIOS[scenario]["label"], rotation=90,
+                 ha="left", va="center")
     fig.legend(handles=class_handles() + [Line2D([], [], color="black", linewidth=0.5,
                                                  label="Class limits of the baseline")],
-               loc="upper left", bbox_to_anchor=(left / WIDTH, (bottom + h) / fig_h),
-               handlelength=1.2, handleheight=0.9, borderaxespad=0)
+               ncol=len(LABELS) + 1, loc="lower center", bbox_to_anchor=(0.5, 0.1 / fig_h),
+               handlelength=1.2, handleheight=0.9, columnspacing=1.0, borderaxespad=0)
     save_figure(fig, "03_classes_monthly")
     plt.close(fig)
 

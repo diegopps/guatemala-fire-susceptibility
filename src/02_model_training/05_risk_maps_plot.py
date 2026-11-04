@@ -1,19 +1,18 @@
 """
 05_risk_maps_plot.py
 --------------------
-Monthly maps of the fire-susceptibility classes of the final models (tables of
-05_risk_maps.py): the mean probability of each calendar month over the training years,
+Maps of the fire-susceptibility classes of the final models (tables of 05_risk_maps.py),
 classified with the frozen whole-year breaks of each model (equal-area quintiles of its mean
 probability over all months of the training years).
 
-Main figure (results/mainfigs/02_risk_maps_monthly.pdf, full width): per cell and month the
-median class of the three models.
+Main figure (results/mainfigs/02_risk_maps.pdf, full width): the whole-year classes, one map
+per model ((a)–(c)).
 Appendix (results/appendix/02_risk_maps_monthly_<model>.pdf, one per model): the classes of
-each model.
+the mean probability of each calendar month over the training years.
 
 Cells outside the pipeline's cell set (lakes) are left blank.
 
-Input:  results/<model_training risk_maps>/cell_months.parquet
+Input:  results/<model_training risk_maps>/cells.parquet, cell_months.parquet
 Output: the figures above
 
 Usage:
@@ -35,12 +34,13 @@ from matplotlib.patches import Patch
 sys.path.append(str(Path(__file__).resolve().parents[1] / "utils"))
 from load_config import cfg
 from chelsa_grid import reference_grid
-from figures import cm, save_figure, setup_style
+from figures import MODELS as MODEL_STYLES, cm, save_figure, setup_style
 from maps import (COUNTRY_LINE, DEPARTMENT_LINE, cells_to_raster, draw_boundaries, draw_raster,
                   map_extent, setup_map)
 
 MODELS = cfg.model_training.models
 IN_DIR = cfg.model_training.paths.results.risk_maps
+YEAR_NAME = "02_risk_maps"
 NAME = "02_risk_maps_monthly"
 LABELS = cfg.risk_classes.labels
 
@@ -87,6 +87,25 @@ def border_handles():
             Line2D([], [], label="Department border", **DEPARTMENT_LINE)]
 
 
+def year_figure(grid, cells):
+    """Whole-year classes of cells.parquet, one map per model."""
+    fig_w = cfg.figures.width_cm.full
+    fig_h, rects = panel_grid(fig_w, 1, len(MODELS), left=1.1, right=0.2, top=0.5, bottom=1.4,
+                              wgap=0.3, hgap=0)
+    fig = plt.figure(figsize=(cm(fig_w), cm(fig_h)))
+    for k, (model, rect) in enumerate(zip(MODELS, rects)):
+        ax = fig.add_axes(rect)
+        draw_map(ax, grid, cells.cell_id, cells[f"{model}_class"], CLASS_CMAP, left=k == 0,
+                 bottom=True)
+        ax.text(0.0, 1.02, f"({'abc'[k]}) {MODEL_STYLES[model]['label']}", transform=ax.transAxes,
+                ha="left", va="bottom")
+    fig.legend(handles=class_handles() + border_handles(), ncol=7, loc="upper center",
+               bbox_to_anchor=(0.5, 0.7 / fig_h), handlelength=1.2, handleheight=0.9,
+               columnspacing=1.0, borderaxespad=0)
+    save_figure(fig, YEAR_NAME)
+    plt.close(fig)
+
+
 def monthly_figure(grid, months, column, name, appendix):
     """12 calendar-month maps (3 x 4) of one class column of cell_months.parquet."""
     fig_w = cfg.figures.width_cm.full
@@ -109,8 +128,8 @@ def monthly_figure(grid, months, column, name, appendix):
 def main():
     setup_style()
     grid = reference_grid()
+    year_figure(grid, pd.read_parquet(IN_DIR / "cells.parquet"))
     months = pd.read_parquet(IN_DIR / "cell_months.parquet")
-    monthly_figure(grid, months, "median_class", NAME, appendix=False)
     for model in MODELS:
         monthly_figure(grid, months, f"{model}_class", f"{NAME}_{model}", appendix=True)
 
