@@ -103,6 +103,8 @@ the predictions into tables, and `<step>_plot.py` draws the figures from those t
 ```
 .
 ├── README.md
+├── LICENSE                  MIT License
+├── CITATION.cff             citation metadata of this code
 ├── config.toml              all paths and method settings
 ├── environment.yml          conda environment, with the versions used for the paper
 ├── data_manifest.csv        size and SHA-256 checksum of every input file
@@ -352,11 +354,12 @@ If you use this code, please cite the paper:
 > susceptibility in Guatemala: machine learning projections to 2100, *journal, volume, pages,
 > DOI, year (to be added)*.
 
-and this code: *Zenodo DOI (to be added)*.
+and this code: *Zenodo DOI (to be added)*. The citation metadata of the code are in
+[`CITATION.cff`](CITATION.cff).
 
 ## License
 
-*To be added.*
+The code is released under the MIT License, see [`LICENSE`](LICENSE).
 
 ## Reference
 
