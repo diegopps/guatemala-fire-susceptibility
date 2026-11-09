@@ -38,6 +38,11 @@ Output: paths.results.future_classification/
                                 (<model>_<scenario>_<period>), whole year
           cell_months.parquet   per cell and calendar month: cell_id, month and <model>_<scenario>
                                 (relative change, periods.end_century)
+          period_means.parquet  the period means: per model, scenario and period (baseline of the
+                                historical scenario; mid_century and end_century of each SSP) and
+                                cell: model, scenario, period, cell_id, year (whole year) and
+                                month_1-12 (float32; the classes are computed in float64). The
+                                column names are the maps of class_shares.csv
 
 Usage:
     python 01_future_classification_evaluate.py
@@ -119,6 +124,14 @@ def class_rows(summary, scenario, period, year_classes, month_classes):
             for name, classes in maps for c in range(1, len(LABELS) + 1)]
 
 
+def period_table(model, scenario, period, cells, year_mean, mean):
+    """Rows of period_means.parquet of one model, scenario and period: the whole-year and
+    monthly period means of each cell."""
+    maps = {"year": year_mean} | {f"month_{m + 1}": mean[m] for m in range(MONTHS)}
+    return pd.DataFrame({"model": model, "scenario": scenario, "period": period,
+                         "cell_id": cells, **{k: v.astype(np.float32) for k, v in maps.items()}})
+
+
 def median_class(classes):
     """Median of the classes of the models (axis 0: models)."""
     return np.sort(np.stack(classes), axis=0)[len(MODELS) // 2]
@@ -162,7 +175,7 @@ def main():
                                "lon": grid.lon[cells % grid.lon.size]})
     month_table = pd.DataFrame({"cell_id": np.repeat(cells, MONTHS),
                                 "month": np.tile(np.arange(1, MONTHS + 1), cells.size)})
-    yearly, shares, year_classes, month_classes = [], [], {}, {}
+    yearly, shares, year_classes, month_classes, period_means = [], [], {}, {}, []
 
     for model in MODELS:
         rows, means = read_model(model, cells.size, breaks[model])
@@ -171,6 +184,7 @@ def main():
         print(f"{model}: baseline cell-months with probability 0: {(base == 0).mean():.3%}")
         for (scenario, period), mean in means.items():
             year_mean = mean.mean(axis=0)
+            period_means.append(period_table(model, scenario, period, cells, year_mean, mean))
             year_class = classify(year_mean, breaks[model])
             month_class = classify(mean.ravel(), breaks[model]).reshape(mean.shape)
             year_classes.setdefault((scenario, period), []).append(year_class)
@@ -200,8 +214,18 @@ def main():
     pd.DataFrame(shares).to_csv(OUT_DIR / "class_shares.csv", index=False, float_format="%.6g")
     cell_table.to_parquet(OUT_DIR / "cells.parquet", index=False)
     month_table.to_parquet(OUT_DIR / "cell_months.parquet", index=False)
+    period_means = pd.concat(period_means, ignore_index=True)
+    for name, values in [("model", MODELS), ("scenario", [HIST] + SSPS),
+                         ("period", [BASELINE] + FUTURE_PERIODS)]:
+        period_means[name] = pd.Categorical(period_means[name], categories=values)
+    period_means.to_parquet(OUT_DIR / "period_means.parquet", index=False)
     print(f"\nSaved: {OUT_DIR}/national_yearly.csv, national_changes.csv, class_shares.csv, "
-          f"cells.parquet, cell_months.parquet")
+          f"cells.parquet, cell_months.parquet, period_means.parquet")
+    for name in ["cells.parquet", "cell_months.parquet", "period_means.parquet"]:
+        print(f"  {name}: {(OUT_DIR / name).stat().st_size / 1024**2:.1f} MB")
+    print(f"  period_means.parquet: {len(period_means):,} rows "
+          f"({period_means.groupby(['model', 'scenario', 'period'], observed=True).ngroups} "
+          f"model x scenario x period)")
     report_usage()
 
 

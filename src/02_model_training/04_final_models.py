@@ -39,6 +39,9 @@ Commands:
                         fit predicted the train rows
   importance <model>    loads the saved model, predicts the validation rows again (they must
                         equal the saved predictions) and runs the permutations
+  export <model>        writes the validation predictions with the cell-month, GCM and fire
+                        label of each row as Parquet, readable and scorable without the model
+                        data of 00_split_data.py
 
 Input:  model data of 00_split_data.py (see utils/model_data.py); folds and selection of
         03_hyperparameter_tuning.py
@@ -51,6 +54,10 @@ Output: paths.models_dir/
           <model>_train.npy, <model>_test.npy, <model>_validation.npy
                             fire probability of each row (float32, in the row order of the
                             subset); train: in-sample, for the maps of step 05 only
+          <model>_validation.parquet
+                            the validation predictions (export): cell_id, year, month, gcm
+                            (categorical, gcms.models), fire (int8, the same in every GCM row
+                            of a cell-month) and probability, in the same row order
           importance_<model>.csv
                             AP of the validation cell-months, unpermuted and per repeat and
                             permuted group or predictor
@@ -62,6 +69,7 @@ Usage:
     python 04_final_models.py fit <model> [--threads N] [--force] [--check]
     python 04_final_models.py predict <model> [--threads N] [--force]
     python 04_final_models.py importance <model> [--threads N] [--force]
+    python 04_final_models.py export <model> [--force]
 """
 
 import argparse
@@ -368,6 +376,37 @@ def importance(model_name, threads, force):
     report_usage()
 
 
+# =============================================================================
+# EXPORT
+# =============================================================================
+
+def export(model_name, force):
+    path = prediction_file(model_name, "validation")
+    out = path.with_suffix(".parquet")
+    if out.exists() and not force:
+        print(f"{out} exists; use --force to recompute.")
+        return
+    if not path.exists():
+        sys.exit(f"{path} not found: run 04_final_models.py fit {model_name} first.")
+    prob = np.load(path)
+    keys = model_data.load_subset("validation", arrays=("cell_id", "year", "month", "gcm", "y"),
+                                  mmap=False)
+    if prob.shape != keys["gcm"].shape:
+        raise ValueError(f"{path}: {prob.size:,} predictions, {keys['gcm'].size:,} validation rows.")
+    table = pd.DataFrame({"cell_id": keys["cell_id"], "year": keys["year"], "month": keys["month"],
+                          "gcm": pd.Categorical.from_codes(keys["gcm"], categories=cfg.gcms.models),
+                          cfg.data.target: keys["y"], "probability": prob})
+    tmp = out.with_name(out.name + ".tmp")
+    table.to_parquet(tmp, index=False)
+    if not np.array_equal(pd.read_parquet(tmp, columns=["probability"]).probability.to_numpy(), prob):
+        raise RuntimeError(f"{tmp}: the probabilities read back differ from {path}.")
+    tmp.rename(out)
+    print(f"Model: {model_name}; {len(table):,} validation rows\n  Saved: {out} "
+          f"({out.stat().st_size / 1024**2:.1f} MB; {path.name}: "
+          f"{path.stat().st_size / 1024**2:.1f} MB)")
+    report_usage()
+
+
 def add_options(p, force=True):
     p.add_argument("--threads", type=int, default=MAX_THREADS,
                    help=f"maximum threads of the algorithm (default {MAX_THREADS})")
@@ -389,6 +428,9 @@ if __name__ == "__main__":
     p = commands.add_parser("importance", help="permutation importance on the validation subset")
     p.add_argument("model", choices=MODELS)
     add_options(p)
+    p = commands.add_parser("export", help="validation predictions as Parquet with their keys")
+    p.add_argument("model", choices=MODELS)
+    p.add_argument("--force", action="store_true", help="recompute existing output")
     a = parser.parse_args()
     if a.command == "fit" and a.check:
         check(a.model)
@@ -396,5 +438,7 @@ if __name__ == "__main__":
         fit(a.model, a.threads, a.force)
     elif a.command == "predict":
         predict(a.model, a.threads, a.force)
+    elif a.command == "export":
+        export(a.model, a.force)
     else:
         importance(a.model, a.threads, a.force)

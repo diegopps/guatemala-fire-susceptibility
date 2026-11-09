@@ -14,9 +14,11 @@
 #     predicts every train row with the saved model (for models fitted before fit did it)
 #   bash src/02_model_training/sbatch_final_models.sh importance <model|all> [options]
 #     permutation importance on the validation subset (needs the saved model)
+#   bash src/02_model_training/sbatch_final_models.sh export <model|all> [options]
+#     validation predictions as Parquet with the cell-month, GCM and fire label of each row
 #   bash src/02_model_training/sbatch_final_models.sh evaluate [options]
 #   bash src/02_model_training/sbatch_final_models.sh all [options]
-#     fit of every model, then its check and importance, then the evaluation (chained)
+#     fit of every model, then its check, importance and export, then the evaluation (chained)
 #   options:
 #     --force   recompute output that already exists
 #     --after   JOB_ID: start only after that job has finished successfully (several:
@@ -50,12 +52,15 @@ declare -A RESOURCES=(
     [predict,extra_trees]="48 9 60"      [predict,xgboost]="8 2 30"      [predict,random_forest]="12 3 60"
     [importance,extra_trees]="48 9 120"  [importance,xgboost]="8 2 60"   [importance,random_forest]="12 3 120"
     [check,extra_trees]="4 1 15"         [check,xgboost]="4 1 15"        [check,random_forest]="4 1 15"
+    [export,extra_trees]="2 1 10"        [export,xgboost]="2 1 10"       [export,random_forest]="2 1 10"
 )
+# export: the 8.5M validation predictions and their keys. Measured (2026-11-09, jobs
+# 2983216-2983218, before the fire column): 3 s, 0.5-0.6 GB; 37-59 MB per file.
 # Evaluation: validation labels and predictions of all models (well under 1 GB); the
 # bootstrap takes a few minutes.
 EVALUATE_RESOURCES="8 2 60"
 
-usage() { sed -n '2,25p' "$0"; exit 1; }
+usage() { sed -n '2,27p' "$0"; exit 1; }
 
 # submit <job name> <memory GB> <CPUs> <time (min)> <extra sbatch options> <commands>; prints the job ID
 submit() {
@@ -95,6 +100,7 @@ submit_command() {   # <command> <model> <after>; prints the job ID
         check)      args="fit $model --check" ;;
         predict)    args="predict $model $FORCE" ;;
         importance) args="importance $model $FORCE" ;;
+        export)     args="export $model $FORCE" ;;
     esac
     id=$(submit "final_${command}_${model}" "$mem" "$cpus" "$minutes" "$(dependency "$after")" \
          "python $SCRIPT $args")
@@ -134,7 +140,7 @@ done
 COMMAND=${ARGS[0]}
 case "$COMMAND" in
     evaluate|all) [ ${#ARGS[@]} -eq 1 ] || usage ;;
-    fit|check|predict|importance) [ ${#ARGS[@]} -eq 2 ] || usage
+    fit|check|predict|importance|export) [ ${#ARGS[@]} -eq 2 ] || usage
                                   RUN_MODELS=($(pick "${ARGS[1]}" "${MODELS[@]}"))
                                   [ ${#RUN_MODELS[@]} -gt 0 ] || usage ;;
     *) usage ;;
@@ -142,7 +148,7 @@ esac
 
 # A failed submission stops the chain, so that no job starts without its dependency.
 case "$COMMAND" in
-    fit|check|predict|importance)
+    fit|check|predict|importance|export)
         for model in "${RUN_MODELS[@]}"; do
             submit_command "$COMMAND" "$model" "$AFTER" >/dev/null || exit 1
         done ;;
@@ -152,7 +158,7 @@ case "$COMMAND" in
         IDS=()
         for model in "${MODELS[@]}"; do
             fit_id=$(submit_command fit "$model" "$AFTER") || exit 1
-            for command in check importance; do
+            for command in check importance export; do
                 id=$(submit_command "$command" "$model" "$fit_id") || exit 1
                 IDS+=("$id")
             done
