@@ -19,6 +19,7 @@ data_dir    = "data"      # symlink to project storage
 results_dir = "results"
 models_dir  = "models"    # relative to data_dir — fitted final models (large), see [model_training.final_models]
 manifest    = "data_manifest.csv"   # checksums of the pipeline inputs, written by src/write_data_manifest.py
+breaks      = "breaks.json"         # frozen susceptibility-class breaks of the final models, written by 05_risk_maps.py
 
 [paths.raw]               # relative to data_dir — raw inputs of src/00_preprocessing
 fire_records     = "rawdata/histfires/histfires_1kmGT_2017-2024.csv"   # fire cell-months (lat, lon, year, month, n_reports, on_grid)

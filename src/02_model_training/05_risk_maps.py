@@ -37,10 +37,11 @@ shares and cells equal to a break are printed.
 
 Input:  predictions of 04_final_models.py (<model>_<subset>.npy, model_training.paths.
         generated.final_models); model data of 00_split_data.py (cell and month of each row)
-Output: results/<model_training risk_maps>/
-          breaks.json         definition, percentiles, labels; per model the breaks, cells
-                              per class and cells equal to a break (read by stage 3,
-                              risk_thresholds.load_breaks)
+Output: paths.breaks         breaks.json in the repository root (tracked by git: the classes
+                              of the published models need it): definition, percentiles,
+                              labels; per model the breaks, cells per class and cells equal
+                              to a break (read by stage 3, risk_thresholds.load_breaks)
+        results/<model_training risk_maps>/
           cells.parquet       per cell: cell_id, lat, lon; per model the susceptibility
                               (<model>) and its class (<model>_class); n_models_high;
                               median_class
@@ -201,8 +202,8 @@ def main():
     month_table.to_parquet(OUT_DIR / "cell_months.parquet", index=False)
     pd.DataFrame(class_table).to_csv(OUT_DIR / "classes.csv", index=False, float_format="%.6g")
     pd.DataFrame(agreement_rows).to_csv(OUT_DIR / "agreement.csv", index=False, float_format="%.6g")
-    print(f"\nSaved: {OUT_DIR}/breaks.json, cells.parquet, cell_months.parquet, classes.csv, "
-          f"agreement.csv")
+    print(f"\nSaved: {BREAKS_FILE}\n       {OUT_DIR}/cells.parquet, cell_months.parquet, "
+          f"classes.csv, agreement.csv")
     report_usage()
 
 

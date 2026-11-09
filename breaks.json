@@ -1,0 +1,131 @@
+{
+  "susceptibility": "mean probability of the final model over the GCMs and all months of the training years (whole year), per cell",
+  "months": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
+  ],
+  "years": [
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2024
+  ],
+  "gcms": [
+    "CanESM5",
+    "CNRM-CM6-1",
+    "CNRM-ESM2-1",
+    "EC-Earth3",
+    "IPSL-CM6A-LR",
+    "MIROC6",
+    "MPI-ESM1-2-HR",
+    "MRI-ESM2-0",
+    "UKESM1-0-LL"
+  ],
+  "cells": 131568,
+  "percentiles": [
+    20,
+    40,
+    60,
+    80
+  ],
+  "labels": [
+    "Very low",
+    "Low",
+    "Medium",
+    "High",
+    "Very high"
+  ],
+  "class_rule": "class = 1 + number of breaks below the value (a value equal to a break falls in the lower class)",
+  "models": {
+    "extra_trees": {
+      "breaks": [
+        0.009669804336963241,
+        0.01996423009068953,
+        0.032829583651048634,
+        0.056885668013031444
+      ],
+      "cells_per_class": [
+        26314,
+        26313,
+        26314,
+        26313,
+        26314
+      ],
+      "cells_equal_to_break": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "predictions": [
+        "/home/diegopab/projects/FFGT/forestfiregt/data/predictions/02_model_training/final_models/extra_trees_train.npy",
+        "/home/diegopab/projects/FFGT/forestfiregt/data/predictions/02_model_training/final_models/extra_trees_test.npy",
+        "/home/diegopab/projects/FFGT/forestfiregt/data/predictions/02_model_training/final_models/extra_trees_validation.npy"
+      ]
+    },
+    "xgboost": {
+      "breaks": [
+        0.022256631548391595,
+        0.07236428447723472,
+        0.12677594269158743,
+        0.21361442209184775
+      ],
+      "cells_per_class": [
+        26314,
+        26313,
+        26314,
+        26313,
+        26314
+      ],
+      "cells_equal_to_break": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "predictions": [
+        "/home/diegopab/projects/FFGT/forestfiregt/data/predictions/02_model_training/final_models/xgboost_train.npy",
+        "/home/diegopab/projects/FFGT/forestfiregt/data/predictions/02_model_training/final_models/xgboost_test.npy",
+        "/home/diegopab/projects/FFGT/forestfiregt/data/predictions/02_model_training/final_models/xgboost_validation.npy"
+      ]
+    },
+    "random_forest": {
+      "breaks": [
+        0.12016692391674344,
+        0.19787332767672422,
+        0.28176656414633955,
+        0.41642824114001364
+      ],
+      "cells_per_class": [
+        26314,
+        26313,
+        26314,
+        26313,
+        26314
+      ],
+      "cells_equal_to_break": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "predictions": [
+        "/home/diegopab/projects/FFGT/forestfiregt/data/predictions/02_model_training/final_models/random_forest_train.npy",
+        "/home/diegopab/projects/FFGT/forestfiregt/data/predictions/02_model_training/final_models/random_forest_test.npy",
+        "/home/diegopab/projects/FFGT/forestfiregt/data/predictions/02_model_training/final_models/random_forest_validation.npy"
+      ]
+    }
+  }
+}

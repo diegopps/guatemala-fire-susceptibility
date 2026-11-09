@@ -59,6 +59,7 @@ def load(path=CONFIG_FILE):
     paths.results_dir = PROJECT_DIR / paths.results_dir
     paths.models_dir = data_dir / paths.models_dir
     paths.manifest = PROJECT_DIR / paths.manifest
+    paths.breaks = PROJECT_DIR / paths.breaks
     _resolve_paths(paths, data_dir, paths.results_dir)
     for name, table in cfg.items():
         if name != "paths" and isinstance(table, dict) and isinstance(table.get("paths"), dict):

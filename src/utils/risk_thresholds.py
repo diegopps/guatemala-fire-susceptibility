@@ -14,7 +14,8 @@ weights) are each split into the same class areas.
 quintile_breaks(values)     breaks (ascending) at the percentiles risk_classes.quintiles
 classify(values, breaks)    class of each value, 1 (lowest) to len(breaks) + 1; a value equal
                             to a break falls in the lower class
-load_breaks()               the frozen breaks of each final model (written by 05_risk_maps.py)
+load_breaks()               the frozen breaks of each final model (paths.breaks, in the
+                            repository root; written by 05_risk_maps.py)
 
 Reference: Verde, J. C. and Zêzere, J. L.: Assessment and validation of wildfire
 susceptibility and hazard in Portugal, Nat. Hazards Earth Syst. Sci., 10, 485–497,
@@ -27,7 +28,7 @@ import numpy as np
 
 from load_config import cfg
 
-BREAKS_FILE = cfg.model_training.paths.results.risk_maps / "breaks.json"
+BREAKS_FILE = cfg.paths.breaks
 
 
 def quintile_breaks(values):
