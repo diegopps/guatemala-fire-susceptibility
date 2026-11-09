@@ -39,8 +39,9 @@ Input:  predictions of 04_final_models.py (<model>_<subset>.npy, model_training.
         generated.final_models); model data of 00_split_data.py (cell and month of each row)
 Output: paths.breaks         breaks.json in the repository root (tracked by git: the classes
                               of the published models need it): definition, percentiles,
-                              labels; per model the breaks, cells per class and cells equal
-                              to a break (read by stage 3, risk_thresholds.load_breaks)
+                              labels; per model the breaks, cells per class, cells equal
+                              to a break and the prediction files used (relative to
+                              paths.data_dir) (read by stage 3, risk_thresholds.load_breaks)
         results/<model_training risk_maps>/
           cells.parquet       per cell: cell_id, lat, lon; per model the susceptibility
                               (<model>) and its class (<model>_class); n_models_high;
@@ -174,7 +175,8 @@ def main():
                 cells.size, MONTHS)[:, m])
         breaks_info[model] = {"breaks": breaks, "cells_per_class": counts,
                               "cells_equal_to_break": ties,
-                              "predictions": [str(PRED_DIR / f"{model}_{s}.npy") for s in keys]}
+                              "predictions": [str((PRED_DIR / f"{model}_{s}.npy").relative_to(
+                                  cfg.paths.data_dir)) for s in keys]}
 
     print("Agreement of the whole-year classes:")
     agreement_rows, n_high = agreement(year_classes)

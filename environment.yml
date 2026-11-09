@@ -25,6 +25,5 @@ dependencies:
   - joblib=1.5.1
   # figures and maps
   - matplotlib=3.10.5
-  - seaborn=0.13.2
   - geopandas=1.1.1
-  - cartopy=0.25.0
+  - shapely=2.1.2

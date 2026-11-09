@@ -8,7 +8,8 @@ steps.
 
 Layout:
   split_index.parquet   one row per cell-month: year, month, cell_id, fire, subset
-  meta.json             source file, features, GCMs, seed, split fractions and counts
+  meta.json             source file (path relative to paths.data_dir, size, modification
+                        time), features, GCMs, seed, split fractions and counts
   <subset>/X.npy        predictors (rows x data.features, in that order), float32
   <subset>/y.npy        target (fire), int8
   <subset>/cell_id.npy  int32 }
@@ -44,10 +45,12 @@ ARRAYS = {"X": np.float32, "y": np.int8, "cell_id": np.int32, "year": np.int16,
 
 
 def source_signature():
-    """Path, size and modification time of the training set, to detect a rebuilt input."""
+    """Path (relative to paths.data_dir), size and modification time of the training set, to
+    detect a rebuilt input."""
     path = cfg.paths.inputs.training_set
     stat = path.stat()
-    return {"path": str(path), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+    return {"path": str(path.relative_to(cfg.paths.data_dir)), "size": stat.st_size,
+            "mtime_ns": stat.st_mtime_ns}
 
 
 def load_meta():

@@ -48,8 +48,8 @@ Input:  model data of 00_split_data.py (see utils/model_data.py); folds and sele
 Output: paths.models_dir/
           <model>.joblib    fitted model (uncompressed)
           <model>.json      configuration and settings, threshold with the test scores
-                            there, training size, seeds, run times, model size, package
-                            versions
+                            there, training size, seeds, run times, model file (relative to
+                            paths.data_dir) and size, package versions
         model_training.paths.generated.final_models/
           <model>_train.npy, <model>_test.npy, <model>_validation.npy
                             fire probability of each row (float32, in the row order of the
@@ -239,7 +239,8 @@ def fit(model_name, threads, force):
                   "seed_folds": cfg.model_training.seed, "seed_sampler": resampling.SEED,
                   "seed_model": models.SEED, "resample_minutes": resample_minutes,
                   "dump_minutes": dump_minutes, "predict_minutes": predict_minutes,
-                  "model_file": str(path), "model_size_gb": size_gb,
+                  "model_file": str(path.relative_to(cfg.paths.data_dir)),
+                  "model_size_gb": size_gb,
                   "tree_nodes": fitting.tree_nodes(model),
                   "peak_memory_gb": round(peak_memory_gb(), 2),
                   "packages": tuning.package_versions()}

@@ -70,9 +70,9 @@
         0
       ],
       "predictions": [
-        "/home/diegopab/projects/FFGT/forestfiregt/data/predictions/02_model_training/final_models/extra_trees_train.npy",
-        "/home/diegopab/projects/FFGT/forestfiregt/data/predictions/02_model_training/final_models/extra_trees_test.npy",
-        "/home/diegopab/projects/FFGT/forestfiregt/data/predictions/02_model_training/final_models/extra_trees_validation.npy"
+        "predictions/02_model_training/final_models/extra_trees_train.npy",
+        "predictions/02_model_training/final_models/extra_trees_test.npy",
+        "predictions/02_model_training/final_models/extra_trees_validation.npy"
       ]
     },
     "xgboost": {
@@ -96,9 +96,9 @@
         0
       ],
       "predictions": [
-        "/home/diegopab/projects/FFGT/forestfiregt/data/predictions/02_model_training/final_models/xgboost_train.npy",
-        "/home/diegopab/projects/FFGT/forestfiregt/data/predictions/02_model_training/final_models/xgboost_test.npy",
-        "/home/diegopab/projects/FFGT/forestfiregt/data/predictions/02_model_training/final_models/xgboost_validation.npy"
+        "predictions/02_model_training/final_models/xgboost_train.npy",
+        "predictions/02_model_training/final_models/xgboost_test.npy",
+        "predictions/02_model_training/final_models/xgboost_validation.npy"
       ]
     },
     "random_forest": {
@@ -122,9 +122,9 @@
         0
       ],
       "predictions": [
-        "/home/diegopab/projects/FFGT/forestfiregt/data/predictions/02_model_training/final_models/random_forest_train.npy",
-        "/home/diegopab/projects/FFGT/forestfiregt/data/predictions/02_model_training/final_models/random_forest_test.npy",
-        "/home/diegopab/projects/FFGT/forestfiregt/data/predictions/02_model_training/final_models/random_forest_validation.npy"
+        "predictions/02_model_training/final_models/random_forest_train.npy",
+        "predictions/02_model_training/final_models/random_forest_test.npy",
+        "predictions/02_model_training/final_models/random_forest_validation.npy"
       ]
     }
   }
