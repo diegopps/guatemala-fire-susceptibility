@@ -1,5 +1,7 @@
 # ForestFireGT
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24080892.svg)](https://doi.org/10.5281/zenodo.24080892)
+
 Code of the paper
 
 > **Mapping present and future forest fire susceptibility in Guatemala: machine learning projections to 2100**
@@ -354,7 +356,13 @@ If you use this code, please cite the paper:
 > susceptibility in Guatemala: machine learning projections to 2100, *journal, volume, pages,
 > DOI, year (to be added)*.
 
-and this code: *Zenodo DOI (to be added)*. The citation metadata of the code are in
+and this code:
+
+> Pineda Schwarz, D.: Mapping present and future forest fire susceptibility in Guatemala: machine
+> learning projections to 2100, Zenodo [code], https://doi.org/10.5281/zenodo.24080892, 2026.
+
+This DOI always resolves to the latest version. The version used for the paper, v1.0.0, has
+its own DOI: https://doi.org/10.5281/zenodo.24080893. The citation metadata of the code are in
 [`CITATION.cff`](CITATION.cff).
 
 ## License

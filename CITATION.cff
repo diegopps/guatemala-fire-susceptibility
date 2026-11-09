@@ -4,7 +4,7 @@ type: software
 title: "Mapping present and future forest fire susceptibility in Guatemala: machine learning projections to 2100"
 version: 1.0.0
 date-released: 2026-11-09
-doi: 10.5281/zenodo.24080893
+doi: 10.5281/zenodo.24080892
 abstract: >-
   Code of the paper "Mapping present and future forest fire susceptibility in Guatemala:
   machine learning projections to 2100". It trains machine-learning classifiers on monthly
