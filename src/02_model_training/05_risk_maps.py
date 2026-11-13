@@ -31,12 +31,17 @@ Median class: per cell, the median of the whole-year classes of the models (the 
 of the sorted classes; model_training.models has an odd number of models), the class the
 models agree on; likewise per cell and calendar month.
 
+Validation fires: the share of the fire cell-months of the validation subset in each class of
+the whole-year map (the class of their cell) and of the monthly map of their calendar month.
+The maps average the predictions of all subsets, so these shares are not out of sample.
+
 Checks: every cell has the same number of rows in every calendar month (years x GCMs), so
 each mean weighs every cell-month and GCM equally; the breaks are strictly ascending; class
 shares and cells equal to a break are printed.
 
 Input:  predictions of 04_final_models.py (<model>_<subset>.npy, model_training.paths.
-        generated.final_models); model data of 00_split_data.py (cell and month of each row)
+        generated.final_models); model data of 00_split_data.py (cell and month of each row;
+        the validation fire cell-months of the split index)
 Output: paths.breaks         breaks.json in the repository root (tracked by git: the classes
                               of the published models need it): definition, percentiles,
                               labels; per model the breaks, cells per class, cells equal
@@ -52,6 +57,9 @@ Output: paths.breaks         breaks.json in the repository root (tracked by git:
                               the cells per class, range of the values
           agreement.csv       per pair of models: same class, within one class, weighted kappa
                               (+ one row per number of models in High or Very high)
+          fire_classes.csv    per model, map (year: whole-year map; month: map of the
+                              calendar month) and class: validation fire cell-months and their
+                              share
 
 Usage:
     python 05_risk_maps.py
@@ -140,14 +148,36 @@ def agreement(classes):
     return rows, n_high.astype(np.int8)
 
 
+def validation_fires(cells):
+    """(cell index, month index) of the fire cell-months of the validation subset."""
+    si = pd.read_parquet(model_data.SPLIT_INDEX, columns=["cell_id", "month", "fire", "subset"])
+    fires = si[(si.subset.astype(str) == "validation") & (si.fire == 1)]
+    pos = np.searchsorted(cells, fires.cell_id.to_numpy())
+    if not (cells[np.minimum(pos, cells.size - 1)] == fires.cell_id.to_numpy()).all():
+        raise ValueError("Validation fire cell-months in cells without predictions.")
+    return pos, fires.month.to_numpy().astype(np.int64) - 1
+
+
+def fire_class_rows(model, year_classes, monthly_classes, fire_cells, fire_months):
+    """Validation fire cell-months per class of the whole-year and the monthly map."""
+    rows = []
+    for map_name, classes in [("year", year_classes[fire_cells]),
+                              ("month", monthly_classes[fire_cells, fire_months])]:
+        rows += [{"model": model, "map": map_name, "class": c, "label": LABELS[c - 1],
+                  "fire_cell_months": int((classes == c).sum()),
+                  "share": float((classes == c).mean())} for c in range(1, len(LABELS) + 1)]
+    return rows
+
+
 def main():
     cells, keys, rows_per_key = cell_month_keys()
+    fire_cells, fire_months = validation_fires(cells)
     grid = reference_grid()
     cell_table = pd.DataFrame({"cell_id": cells, "lat": grid.lat[cells // grid.lon.size],
                                "lon": grid.lon[cells % grid.lon.size]})
     month_table = pd.DataFrame({"cell_id": np.repeat(cells, MONTHS),
                                 "month": np.tile(np.arange(1, MONTHS + 1), cells.size)})
-    breaks_info, class_table, year_classes = {}, [], {}
+    breaks_info, class_table, year_classes, fire_table = {}, [], {}, []
 
     for model in MODELS:
         missing = [s for s in keys if not (PRED_DIR / f"{model}_{s}.npy").exists()]
@@ -173,6 +203,10 @@ def main():
         for m in range(MONTHS):
             class_table += class_rows(model, f"month_{m + 1}", means[:, m], monthly_classes.reshape(
                 cells.size, MONTHS)[:, m])
+        fire_table += fire_class_rows(model, classes, monthly_classes.reshape(cells.size, MONTHS),
+                                      fire_cells, fire_months)
+        print(f"  validation fire cell-months ({fire_cells.size}) in Very high: whole-year map "
+              f"{fire_table[-6]['share']:.1%}, map of their month {fire_table[-1]['share']:.1%}")
         breaks_info[model] = {"breaks": breaks, "cells_per_class": counts,
                               "cells_equal_to_break": ties,
                               "predictions": [str((PRED_DIR / f"{model}_{s}.npy").relative_to(
@@ -204,8 +238,9 @@ def main():
     month_table.to_parquet(OUT_DIR / "cell_months.parquet", index=False)
     pd.DataFrame(class_table).to_csv(OUT_DIR / "classes.csv", index=False, float_format="%.6g")
     pd.DataFrame(agreement_rows).to_csv(OUT_DIR / "agreement.csv", index=False, float_format="%.6g")
+    pd.DataFrame(fire_table).to_csv(OUT_DIR / "fire_classes.csv", index=False, float_format="%.6g")
     print(f"\nSaved: {BREAKS_FILE}\n       {OUT_DIR}/cells.parquet, cell_months.parquet, "
-          f"classes.csv, agreement.csv")
+          f"classes.csv, agreement.csv, fire_classes.csv")
     report_usage()
 
 

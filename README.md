@@ -95,7 +95,8 @@ full. This README gives the overview.
 | 02 | `02_resampling*.py` | Six samplers on the training cell-months of each selected algorithm (random over- and undersampling, SMOTE, ADASYN, Tomek links, neighbourhood cleaning rule), compared with class weights. Selected per algorithm: `model_training.samplers` |
 | 03 | `03_hyperparameter_tuning*.py` | Random search: the defaults and 100 configurations per algorithm, threefold cross-validation over the training cell-months, scored by peak MCC; the selected configuration is refitted |
 | 04 | `04_final_models*.py` | Final models fitted on the whole train subset and saved; decision threshold; validation scores with 95% bootstrap intervals, top-k coverage and permutation importance of predictor groups |
-| 05 | `05_risk_maps*.py` | Susceptibility of each cell, frozen class breaks (`breaks.json`), classes per model and month, agreement between the models, maps |
+| 04b | `04b_cv_test*.py` | Cross-validation test: the final configurations refitted on folds of all cell-months of the training years, by year (leave-one-year-out) and by 30 km spatial blocks; out-of-fold AP, ROC-AUC and top-k coverage, compared with a baseline from the fire records alone (kernel density of the training fires times their seasonal cycle); spatial autocorrelation of the burned cells |
+| 05 | `05_risk_maps*.py` | Susceptibility of each cell, frozen class breaks (`breaks.json`), classes per model and month, agreement between the models, share of the validation fires per class, maps |
 
 Each step is split across scripts: `<step>.py` fits and predicts, `<step>_evaluate.py` scores
 the predictions into tables, and `<step>_plot.py` draws the figures from those tables.
@@ -138,8 +139,10 @@ Modules in `src/utils/`:
 | `models.py` | The eight candidate algorithms and their default settings |
 | `resampling.py` | The samplers, applied to cell-months (with a self-test) |
 | `tuning.py` | Configurations of the random search, folds, cross-validation scores |
-| `fitting.py` | Fitting and prediction, shared by steps 03–04 and stage 3 |
-| `classification_metrics.py` | MCC curve over all thresholds, average precision, ROC-AUC |
+| `fitting.py` | Fitting and prediction, shared by steps 03–04b and stage 3 |
+| `cv_folds.py` | Data and folds of the cross-validation test (step 04b): the three subsets combined, year and spatial-block folds, spatial autocorrelation |
+| `kde_baseline.py` | The fire-record baseline of step 04b: kernel density of the training fires times their seasonal cycle |
+| `classification_metrics.py` | MCC curve over all thresholds, average precision, ROC-AUC, top-k coverage |
 | `risk_thresholds.py` | Quintile breaks, classification, `load_breaks()` |
 | `resources.py` | CPUs of the SLURM allocation, peak memory |
 | `figures.py`, `maps.py` | Figure style (Copernicus guidelines) and map helpers |
@@ -156,8 +159,9 @@ models (joblib files) need the same scikit-learn and XGBoost versions to load.
 
 The full pipeline needs a computing cluster:
 
-- **Data.** The daily climate input alone is 3.4 TB; the generated data take about 140 GB more.
-- **Memory.** The largest jobs need about 90 GB (extra trees with SMOTE).
+- **Data.** The daily climate input alone is 3.4 TB; the generated data take about 150 GB more.
+- **Memory.** The largest jobs need about 110 GB (extra trees with SMOTE, the fold fits of
+  step 04b).
 - **Model size.** The extra-trees final model is 19.7 GB on disk.
 - **Scheduler.** The paper runs used SLURM; see [Running the pipeline](#running-the-pipeline).
 
@@ -246,6 +250,7 @@ bash $S/sbatch_hyperparameter_tuning.sh refit all  # once every CV fit is scored
 python $S/03_hyperparameter_tuning_plot.py
 bash $S/sbatch_final_models.sh all                 # fit, check, importance, export; then the evaluation
 python $S/04_final_models_plot.py
+bash $S/sbatch_cv_test.sh all                      # folds, fold fits and baselines, autocorrelation; then the evaluation
 bash $S/sbatch_risk_maps.sh all                    # susceptibility, breaks.json, classes; then the maps
 ```
 
@@ -253,6 +258,13 @@ Two choices are made between steps and recorded in `config.toml`: the algorithms
 01 (`model_training.models`) and the correction of the class imbalance after step 02
 (`model_training.samplers`). The file holds those of the paper. The `_plot.py` scripts of
 steps 01–04 read only the result tables and run in seconds.
+
+Step 04b needs the final models' settings (`models/<model>.json`, step 04) and, for its
+comparison table, the validation scores of `04_final_models_evaluate.py`. Its commands can
+also be submitted one at a time (`bash $S/sbatch_cv_test.sh` prints them): `folds`;
+`fit <model|all> <loyo|blocks|all>` (one task per fold); `baseline <loyo|blocks|validation|all>`;
+`autocorrelation`; `evaluate`. The 11 fold fits of extra trees take about 25 min and 110 GB
+each.
 
 ### Stage 3: projections
 
@@ -276,6 +288,7 @@ Stage 3 needs the saved final models (step 04), `breaks.json` (step 05), the mon
 | `indata/training/allvars_2018-2024.parquet` | Training table | `01_build_training_set.py` |
 | `indata/training/split_index/` | Split and model matrices of each subset (see `utils/model_data.py`) | `00_split_data.py` |
 | `predictions/02_model_training/` | Predictions of steps 01–04 (`.npy`); validation predictions of the final models with cell, month, GCM and fire label (`<model>_validation.parquet`); permutation importance | steps 01–04 |
+| `predictions/02_model_training/cv_test/` | Cross-validation test: the three subsets combined (`combined/`, 4.8 GB), the cell-month table, the folds, the out-of-fold predictions of each model and fold (`oof/`) and the baseline scores (`baselines/`); no fold model is saved | `04b_cv_test.py` |
 | `models/` | Final models (`<model>.joblib`) and their settings, decision threshold and test scores (`<model>.json`) | `04_final_models.py fit` |
 | `predictions/03_future_classification/` | Fire probability per model, GCM and scenario (`<model>/<gcm>_<scenario>.npy`: years x 12 months x cells, float32) and the cell list (`cells.npy`) | `01_future_classification.py` |
 
@@ -284,7 +297,8 @@ Stage 3 needs the saved final models (step 04), `breaks.json` (step 05), the mon
 | Folder | Content |
 |---|---|
 | `01_data_exploration/` | Fire cells, per-cell predictor means, national climate means and changes, correlation matrix |
-| `02_model_training/01_model_testing/` … `05_risk_maps/` | Per step: scores, threshold curves, cross-validation results, selected hyperparameters, validation scores, top-k coverage, importance; susceptibility and classes of each cell and calendar month |
+| `02_model_training/01_model_testing/` … `05_risk_maps/` | Per step: scores, threshold curves, cross-validation results, selected hyperparameters, validation scores, top-k coverage, importance; susceptibility and classes of each cell and calendar month, validation fires per class |
+| `02_model_training/04b_cv_test/` | Cross-validation test: the comparison of the models and the baseline on the validation subset, leave-one-year-out and spatial blocks (`comparison.csv`), the scores per fold or year, fold sizes, the deal of the blocks, the spatial autocorrelation of the burned cells |
 | `03_future_classification/` | National means per year and their changes, class shares, baseline classes and relative change per cell (and month), period means per cell (`period_means.parquet`) |
 | `mainfigs/`, `appendix/` | Figures of the paper and its appendix (PDF) |
 
@@ -334,6 +348,7 @@ cell-month.
 
 - **Seeds.** All are fixed:
   - split and folds: `model_training.seed` (107);
+  - deal of the spatial blocks of step 04b: `model_training.cv_test.seed` (107);
   - algorithms and samplers: 42 (`utils/models.py`, `utils/resampling.py`);
   - draws of the random search: `model_training.tuning.seed` (42);
   - bootstrap and permutations: `model_training.final_models.seed` (42).

@@ -3,10 +3,12 @@ classification_metrics.py
 -------------------------
 Scores of a binary classifier from labels y (0/1) and predicted probabilities p.
 
-    from classification_metrics import threshold_curve, scores, at_threshold, plot_points
+    from classification_metrics import (threshold_curve, scores, at_threshold, topk_coverage,
+                                        plot_points)
     s = scores(y, p)        # dict: AP, ROC-AUC, peak MCC and the confusion matrix there
     c = threshold_curve(y, p)
     t = at_threshold(y, p, 0.2)   # dict: MCC, balanced accuracy, ... at a given threshold
+    k = topk_coverage(y, p, [1, 10])   # dict: share of the positives among the top 1%, 10%
 
 Decision thresholds: a cell is predicted positive if p >= threshold. Candidate
 thresholds are all distinct values of p, so the curve covers every operating point the
@@ -85,6 +87,23 @@ def at_threshold(y, p, threshold):
             "balanced_accuracy": (recall + tnr) / 2,
             "precision": tp / (tp + fp) if tp + fp else 0.0, "recall": recall,
             "tp": tp, "fp": fp, "fn": fn, "tn": tn}
+
+
+def topk_coverage(y, p, percents):
+    """{k: expected share of the positives among the top k% of the cases ranked by p} for each
+    k in percents, with ties broken at random: the k% are round(k / 100 n) cases; a case above
+    the value at the cut counts 1, one tied with it the share of the free places among the
+    tied cases, one below 0."""
+    p = np.asarray(p)
+    s = np.sort(p)[::-1]
+    out = {}
+    for k in percents:
+        n = int(round(k / 100 * p.size))
+        v = s[n - 1]
+        above, tie = p > v, p == v
+        flagged = above + tie * ((n - above.sum()) / tie.sum())
+        out[k] = float((flagged * y).sum() / y.sum())
+    return out
 
 
 def plot_points(curve, n_log=3000, n_lin=1000):
