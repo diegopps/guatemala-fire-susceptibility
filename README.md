@@ -274,6 +274,7 @@ F=src/03_future_classification
 bash $F/sbatch_future_classification.sh predict all                  # per model: 9 GCMs x 4 scenarios
 bash $F/sbatch_future_classification.sh evaluate --after <predict_job_ids>
 bash $F/sbatch_future_classification.sh plot --after <evaluate_job_id>
+bash $F/sbatch_extrapolation.sh                                       # climate vs. training envelope
 ```
 
 Stage 3 needs the saved final models (step 04), `breaks.json` (step 05), the monthly climate
@@ -300,7 +301,7 @@ Stage 3 needs the saved final models (step 04), `breaks.json` (step 05), the mon
 | `01_data_exploration/` | Fire cells, per-cell predictor means, national climate means and changes, correlation matrix |
 | `02_model_training/01_model_testing/` … `05_risk_maps/` | Per step: scores, threshold curves, cross-validation results, selected hyperparameters, validation scores, top-k coverage, importance; susceptibility and classes of each cell and calendar month, validation fires per class |
 | `02_model_training/04b_cv_test/` | Cross-validation test: the comparison of the models and the baseline on the validation subset, leave-one-year-out and spatial blocks (`comparison.csv`), the scores per fold or year, fold sizes, the deal of the blocks, the spatial autocorrelation of the burned cells |
-| `03_future_classification/` | Share of the country in the High and Very high classes per year (`national_yearly.csv`) and per period (`high_risk_shares.csv`), class shares (`class_shares.csv`), shares of the class changes (`class_changes.csv`), baseline class, class and class change per cell (`cells.parquet`) and per cell and calendar month (`cell_months.parquet`, 2081–2100), period means per cell (`period_means.parquet`) |
+| `03_future_classification/` | Share of the country in the High and Very high classes per year (`national_yearly.csv`) and per period (`high_risk_shares.csv`), class shares (`class_shares.csv`), shares of the class changes (`class_changes.csv`), baseline class, class and class change per cell (`cells.parquet`) and per cell and calendar month (`cell_months.parquet`, 2081–2100), period means per cell (`period_means.parquet`); extrapolation (`02_extrapolation.py`): the training envelope of the climate predictors (`extrapolation_envelope.csv`) and the share of the cell-months outside it (MESS < 0) per period (`extrapolation_shares.csv`), per department and elevation band (`extrapolation_regions.csv`) and per season, also against the envelope of the same calendar month (`extrapolation_seasons.csv`) |
 | `mainfigs/`, `appendix/` | Figures of the paper and its appendix (PDF) |
 
 The figures and the scripts that draw them:

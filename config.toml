@@ -243,3 +243,13 @@ risk_maps            = "02_model_training/05_risk_maps"
 quintiles  = [20, 40, 60, 80]
 labels     = ["Very low", "Low", "Medium", "High", "Very high"]  # classes 1..5
 high_risk  = [4, 5]               # High + Very high: model agreement (step 05), future trend (stage 3)
+
+# =============================================================================
+# FUTURE CLASSIFICATION (src/03_future_classification)
+# =============================================================================
+
+# Extrapolation (step 02, 02_extrapolation.py): the climate predictors of the projected periods
+# against the training envelope (their range over all rows of the training set).
+[future_classification.extrapolation]
+elevation_bands_m = [500, 1000, 1500, 2000, 2500, 3000]       # edges of the elevation bands (m)
+seasons = { jun_sep = [6, 7, 8, 9], nov_apr = [11, 12, 1, 2, 3, 4] }   # nov_apr = fire_season.months
