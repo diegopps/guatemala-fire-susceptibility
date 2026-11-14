@@ -45,7 +45,8 @@ declare -A RESOURCES=(
 # Evaluate and plot: "memory (GB) CPUs time (min)". Measured (2026-10-30, jobs 2792338-2792339):
 # evaluate 1.9 min, 1.0 GB in the process (4.0 GB with the memory-mapped predictions, which the
 # system can release); plot 1.2 min, 0.9 GB. With period_means.parquet (2026-11-09, job 2983219):
-# evaluate 1.9 min, 1.2 GB in the process; period_means.parquet 162.5 MB.
+# evaluate 1.9 min, 1.2 GB in the process; period_means.parquet 162.5 MB. With the class changes
+# (2026-11-14, jobs 3253642-3253643): evaluate 2.0 min, 1.1 GB in the process; plot 1.1 min, 0.9 GB.
 declare -A SINGLE_RESOURCES=(
     [evaluate]="6 1 15"
     [plot]="2 1 10"

@@ -42,7 +42,7 @@ The pipeline has four stages, one folder of `src/` each:
 | 0 | `src/00_preprocessing` | Aggregates the daily climate of each GCM to monthly means; builds the training table (fire label and 14 predictors of every GCM, cell and month of the training years) |
 | 1 | `src/01_data_exploration` | Maps of the fire records and the predictors, climate trends 1961–2100, correlation of the predictors |
 | 2 | `src/02_model_training` | Split, choice of the algorithms, correction of the class imbalance, hyperparameter tuning, final models and their validation, susceptibility classes |
-| 3 | `src/03_future_classification` | Fire probability of every cell-month 1961–2100 for each final model, GCM and scenario; classes and change relative to 1991–2014 |
+| 3 | `src/03_future_classification` | Fire probability of every cell-month 1961–2100 for each final model, GCM and scenario; classes and class change relative to 1991–2014 |
 
 Every script starts with a docstring that documents its method, inputs, outputs and usage in
 full. This README gives the overview.
@@ -84,7 +84,8 @@ full. This README gives the overview.
   [`breaks.json`](breaks.json) and applied unchanged to the monthly maps and to every projected
   period, so class areas can change over time.
 - **No calibration.** Probabilities are used as the models give them. Projected changes are
-  relative changes on each model's own probability scale.
+  therefore expressed in classes: the class change of a cell (future minus baseline class,
+  with the frozen breaks) and the share of the country in the High and Very high classes.
 
 ### Steps of the model training (stage 2)
 
@@ -299,7 +300,7 @@ Stage 3 needs the saved final models (step 04), `breaks.json` (step 05), the mon
 | `01_data_exploration/` | Fire cells, per-cell predictor means, national climate means and changes, correlation matrix |
 | `02_model_training/01_model_testing/` … `05_risk_maps/` | Per step: scores, threshold curves, cross-validation results, selected hyperparameters, validation scores, top-k coverage, importance; susceptibility and classes of each cell and calendar month, validation fires per class |
 | `02_model_training/04b_cv_test/` | Cross-validation test: the comparison of the models and the baseline on the validation subset, leave-one-year-out and spatial blocks (`comparison.csv`), the scores per fold or year, fold sizes, the deal of the blocks, the spatial autocorrelation of the burned cells |
-| `03_future_classification/` | National means per year and their changes, class shares, baseline classes and relative change per cell (and month), period means per cell (`period_means.parquet`) |
+| `03_future_classification/` | Share of the country in the High and Very high classes per year (`national_yearly.csv`) and per period (`high_risk_shares.csv`), class shares (`class_shares.csv`), shares of the class changes (`class_changes.csv`), baseline class, class and class change per cell (`cells.parquet`) and per cell and calendar month (`cell_months.parquet`, 2081–2100), period means per cell (`period_means.parquet`) |
 | `mainfigs/`, `appendix/` | Figures of the paper and its appendix (PDF) |
 
 The figures and the scripts that draw them:
@@ -315,7 +316,7 @@ The figures and the scripts that draw them:
 | `mainfigs/02_hyperparameter_tuning.pdf` | `02_model_training/03_hyperparameter_tuning_plot.py` |
 | `mainfigs/02_final_models_validation.pdf`, `appendix/02_final_models_importance.pdf` | `02_model_training/04_final_models_plot.py` |
 | `mainfigs/02_risk_maps.pdf`, `appendix/02_risk_maps_monthly_<model>.pdf` | `02_model_training/05_risk_maps_plot.py` |
-| `mainfigs/03_national_change.pdf`, `mainfigs/03_classes_monthly.pdf`, `mainfigs/03_change_maps.pdf`, `appendix/03_change_monthly_<model>_<scenario>.pdf` | `03_future_classification/01_future_classification_plot.py` |
+| `mainfigs/03_change_maps.pdf`, `mainfigs/03_high_risk_share.pdf`, `mainfigs/03_classes_monthly.pdf`, `appendix/03_change_monthly_<model>_<scenario>.pdf` | `03_future_classification/01_future_classification_plot.py` |
 
 ### `breaks.json`
 
