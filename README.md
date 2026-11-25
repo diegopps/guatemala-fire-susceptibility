@@ -378,8 +378,9 @@ and this code:
 > Pineda Schwarz, D.: Mapping present and future forest fire susceptibility in Guatemala: machine
 > learning projections to 2100, Zenodo [code], https://doi.org/10.5281/zenodo.24080892, 2026.
 
-This DOI always resolves to the latest version. The version used for the paper, v1.0.0, has
-its own DOI: https://doi.org/10.5281/zenodo.24080893. The citation metadata of the code are in
+This DOI always resolves to the latest version. The version used for the paper is v1.1.0; each
+version has its own DOI, listed on the Zenodo record (the earlier v1.0.0:
+https://doi.org/10.5281/zenodo.24080893). The citation metadata of the code are in
 [`CITATION.cff`](CITATION.cff).
 
 ## License
